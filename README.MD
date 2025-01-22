@@ -1,10 +1,9 @@
-﻿﻿# VaniFine 
-
+﻿# VaniFine 
 ![Tested on](https://badge.ttsalpha.com/api?label=Tested%20on&status=25w03a&color=a64B00)
 
 ![Resource Pack Version](https://badge.ttsalpha.com/api?label=Resource%20Pack%20Version&status=48&color=ddd)
-## What's That
-This is a small but helpful tool that allows you to convert [CIT](https://modrinth.com/mod/cit-resewn)/OptiFine resource packs to vanilla ones.
+## What's This?
+This is a small but helpful tool that allows you to convert [CIT](https://modrinth.com/mod/cit-resewn)/OptiFine resource packs to a vanilla compatible ones.
 
 ### Why it works?
 Since snapshot [25w03a](https://minecraft.wiki/w/Java_Edition_25w03a), a feature has been added that allows Minecraft client to select a specific model of an **item** among others, depending on its component value.
