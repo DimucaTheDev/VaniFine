@@ -1,6 +1,7 @@
 ﻿# VaniFine
-![Tested on](https://badge.ttsalpha.com/api?label=Tested on&status=25w03a&color=a64B00)
-![Resource Pack Version](https://badge.ttsalpha.com/api?label=Resource Pack Version&status=48&color=ddd)
+![Tested on](https://badge.ttsalpha.com/api?label=Tested%20on&status=25w03a&color=a64B00)
+
+![Resource Pack Version](https://badge.ttsalpha.com/api?label=Resource%20Pack%20Version&status=48&color=ddd)
 ## What's That
 This is a small but helpful tool that allows you to convert [CIT](https://modrinth.com/mod/cit-resewn)/OptiFine resource packs to vanilla ones.
 
@@ -36,16 +37,16 @@ And as a bonus, a `names.txt` file will be created in that folder, with all avai
 
 # Gallery
 Poster on a wall. [КСЕПСП](https://www.planetminecraft.com/texture-pack/ksepsp-v9-optifine-cit/)
-![Poster. Renamed painting in item frame.](https://github.com/dimucathedev/vanifine/images/poster.png)
+![Poster. Renamed painting in item frame.](https://github.com/DimucaTheDev/VaniFine/blob/cfc9b71d1077ab81efe2cc3307759e9a3a72553c/images/poster.png)
 
 Bundles! [Bundled](https://modrinth.com/mod/bundled_)
-![Bundles!](https://github.com/dimucathedev/vanifine/images/renamed_bundles_and_a_potion.png)
+![Bundles!](https://github.com/DimucaTheDev/VaniFine/blob/cfc9b71d1077ab81efe2cc3307759e9a3a72553c/images/renamed_bundles_and_a_potion.png)
 
 Telescope. [КСЕПСП](https://www.planetminecraft.com/texture-pack/ksepsp-v9-optifine-cit/)
-![Renamed spyglass in item frame](https://github.com/dimucathedev/vanifine/images/renamed_bundles_and_a_potion.png)
+![Renamed spyglass in item frame](https://github.com/DimucaTheDev/VaniFine/blob/cfc9b71d1077ab81efe2cc3307759e9a3a72553c/images/telescope.png)
 
 Converting a pack.
-![](https://github.com/dimucathedev/vanifine/images/in_progress.png)
+![](https://github.com/DimucaTheDev/VaniFine/blob/cfc9b71d1077ab81efe2cc3307759e9a3a72553c/images/in_progress.png)
 
 ## Licensing & Redistribution
 This project is licensed under the [MIT License](LICENSE). You can use this project in your own projects, but you must credit me as the original author.
