@@ -42,6 +42,7 @@ namespace VaniFine
         private static JsonDocument AllItems;
         private static JsonDocument AllItemModels;
         private static JsonDocument AllBlockModels;
+        private const int ResourcePackVersion = 49;
         #region
         [DllImport("comdlg32.dll", SetLastError = true, CharSet = CharSet.Auto)]
         private static extern bool GetOpenFileName(ref OpenFileName ofn);
@@ -148,6 +149,7 @@ namespace VaniFine
         private static bool CantVerifyBlocks;
         private static string GetName(this string value)
         {
+            if (string.IsNullOrWhiteSpace(value)) return value;
             string v = value;
             if (v.Contains("regex:"))
             {
@@ -285,7 +287,7 @@ namespace VaniFine
             {
                 pack = new Pack
                 {
-                    PackFormat = 48,
+                    PackFormat = ResourcePackVersion,
                     Description = "\u00A74[CONVERTED]\u00A7r " + packMetadata["pack"].Description
                 }
             };
@@ -381,16 +383,21 @@ namespace VaniFine
                         line => line.Split('=')[1].Replace("\r", "")
                     );
                 lines.Add("FILE_NAME", entry.Name);
+
                 if (!lines.ContainsKey("items") && lines.ContainsKey("matchItems"))
                     lines["items"] = lines["matchItems"];
+
+                if (!lines.ContainsKey("model") && !lines.ContainsKey("texture"))
+                {
+                    var png = Path.GetFileNameWithoutExtension(entry.FullName) + ".png";
+                    var checkPngPath = Path.Combine(Path.GetDirectoryName(entry.FullName)!, png).Replace("\\", "/");
+                    if (zipArchive.GetEntry(checkPngPath) != null)
+                        lines.Add("texture", Path.GetFileName(png));
+                }
+
                 foreach (var itemKey in lines["items"].Split(' '))
                 {
                     var itemLines = new Dictionary<string, string>(lines);
-
-                    if (itemLines.ContainsKey("matchItems"))
-                        itemLines["matchItems"] = itemKey;
-                    if (itemLines.ContainsKey("items"))
-                        itemLines["items"] = itemKey;
 
                     if (!itemDefinitions.ContainsKey(itemKey))
                         itemDefinitions[itemKey] = new List<Dictionary<string, string>>();
@@ -400,87 +407,76 @@ namespace VaniFine
 
             return itemDefinitions;
         }
+
         private static void GenerateItemJsonFiles(Dictionary<string, List<Dictionary<string, string>>> itemDefinitions, string outputPath)
         {
             int i = 0;
             string allNames = $"{outputPath}/names.txt";
             File.WriteAllText(allNames, $"{WaterMark}\r\nItems: {itemDefinitions.Count}\r\nUnique names:{itemDefinitions.Values.SelectMany(s => s).Sum(s => s.Count + 1)}");
+
             foreach (var (item, definitions) in itemDefinitions)
             {
                 int j = 1;
                 File.AppendAllText(allNames, $"\r\n{++i}) {item}\r\n");
                 List<string> used = new();
                 string component = "";
+
                 string cases = string.Join(",", definitions.Select(config =>
                 {
                     if (string.IsNullOrWhiteSpace(component))
                         component = config.FirstOrDefault(kvp => kvp.Key.StartsWith("nbt.")).Key?.Replace("nbt.", "").ToLower()!;
+                    if (string.IsNullOrWhiteSpace(component) && config.ContainsKey("enchantmentIDs"))
+                        component = "stored_enchantments";
+
                     string value = config.FirstOrDefault(kvp => kvp.Key.StartsWith("nbt.")).Value;
                     if (used.Contains(value)) return null;
                     if (value == "minecraft:empty") return null;
-                    var hasModel = config.ContainsKey("model");
+
+                    var hasModel = config.Any(s => s.Key.StartsWith("model"));
                     var confFileName = Path.GetFileNameWithoutExtension(config["FILE_NAME"]);
                     string model =
                         hasModel
-                            ? config["model"].Replace(" ", "").Replace(".json", "")
+                            ? config.First(s => s.Key.StartsWith("model")).Value.Replace(" ", "").Replace(".json", "")
                             : $"item/{confFileName}";
-
-                    if (config["type"] == "armor")
-                    // that is a goddayum armor
+                    model = Path.GetFileName(model);
+                    if (!hasModel && config.TryGetValue("texture", out var texture))
                     {
-                        // head
-                        string json = "{\r\n  \"parent\": \"minecraft:item/generated\",\r\n  \"textures\": {";
-                        // body
-                        if (config.TryGetValue($"texture.{item.Split("_")[0]}_layer_1", out var layer0))
-                            json += $"\r\n    \"layer0\": \"item/{layer0}\"";
-                        if (config.TryGetValue($"texture.{item.Split("_")[0]}_layer_1_overlay", out var layer0_overlay))
-                            json += $",\r\n    \"layer1\": \"item/{layer0_overlay}\"";
-                        // footer
-                        json += "\r\n  }\r\n}";
-                        // File.WriteAllText(Path.Combine(outputPath, "assets/minecraft/models", $"{model}.json"), json);
+                        File.WriteAllText(
+                            Path.Combine(outputPath, "assets/minecraft/models/item", $"{confFileName}.json"),
+                            SampleItemModelTemplate.Replace("ITEM", texture.Replace(".png", ""))
+                        );
                     }
 
-                    if (!hasModel)
-                    {
-                        if (config.TryGetValue("texture", out var texture))
-                        {
-                            File.WriteAllText(
-                                Path.Combine(outputPath, "assets/minecraft/models/item", $"{confFileName}.json"),
-                                SampleItemModelTemplate.Replace("ITEM", texture.Replace(".png", ""))
-                            );
-                        }
-                        else Console.WriteLine($"Item {confFileName} has no model or texture");
-                    }
                     if (!model.StartsWith("item")) model = "item/" + model;
 
-                    string whenValue = component switch
+                    // Обработка enchantmentIDs
+                    if (config.ContainsKey("enchantmentIDs"))
                     {
-                        "potion" => JsonSerializer.Serialize(new Dictionary<string, string> { { "potion", value.GetName() } }),
-                        "display.name" => JsonSerializer.Serialize(value.GetName(), new JsonSerializerOptions() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }),
-                        _ => throw new NotImplementedException($"Unknown component type: {component}")
-                    };
+                        var enchantments = config["enchantmentIDs"].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        var enchantmentCases = enchantments.SelectMany(enchantment =>
+                            Enumerable.Range(1, 5).Select(level => CaseTemplate
+                                .Replace("MODEL", $"item/{enchantment}")
+                                .Replace("WHEN", JsonSerializer.Serialize(new Dictionary<string, int>
+                                {
+                            { $"minecraft:{enchantment}", level }
+                                }))));
+
+                        used.Add(config["enchantmentIDs"]);
+                        return string.Join(",", enchantmentCases);
+                    }
+
                     used.Add(value);
-
-                    File.AppendAllText(allNames, $"\t{i}.{j++}) {value.GetName()}\r\n");
-
                     return CaseTemplate
                         .Replace("MODEL", model)
-                        .Replace("WHEN", whenValue);
+                        .Replace("WHEN", JsonSerializer.Serialize((object)(
+                            component switch
+                            {
+                                "potion_contents" or "potion" => new Dictionary<string, string> { { "potion", value } },
+                                "display.name" => value.GetName(),
+                                //new Dictionary<string, string> { { component, value } }
+                                _ => throw new NotImplementedException($"Unknown component type: {component}")
+                            }), new JsonSerializerOptions() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
                 }).Where(s => s is not null));
-
-
-                string jsonElement = "item";
-                if (!CantVerifyBlocks)
-                    try
-                    {
-                        var property = AllItems.RootElement.GetProperty(item).GetProperty("model");
-                        jsonElement = property.GetProperty("model").GetString()!;
-                        jsonElement = jsonElement.Remove(jsonElement.IndexOf("/")).Replace("minecraft:", "");
-                        Directory.CreateDirectory(Path.Combine(outputPath, "assets/minecraft/models", jsonElement));
-                        File.WriteAllText(Path.Combine(outputPath, "assets/minecraft/models", jsonElement, $"{item}.json"),
-                            (jsonElement == "item" ? AllItemModels : AllBlockModels).RootElement.GetProperty(item).GetRawText());
-                    }
-                    catch (Exception e) { }
 
                 string itemJson = string.IsNullOrWhiteSpace(cases)
                     ? EmptyCaseTemplate.Replace("ITEM", item)
@@ -489,18 +485,20 @@ namespace VaniFine
                         {
                             "potion" => "minecraft:potion_contents",
                             "display.name" => "minecraft:custom_name",
-                            _ => throw new NotImplementedException($"CIT condition not supported: {component}")
+                            "stored_enchantments" => "minecraft:stored_enchantments",
+                            _ => throw new NotImplementedException($"Unknown component type: {component}")
                         })
-                        .Replace("BLOCK_OR_ITEM", CantVerifyBlocks ? "item" : jsonElement)
+                        .Replace("BLOCK_OR_ITEM", "item")
                         .Replace("CASES", cases)
                         .Replace("ITEM", item)
                         .Replace("FALLBACK", GetFallbackModel(item));
-                //.Replace("TINTS", item is "potion" or "lingering_potion" or "splash_potion" ? DefaultPotionTint : "");
+
                 var path2 = $"assets/minecraft/items/{item}.json";
                 string outputFilePath = Path.Combine(outputPath, path2);
+                Console.WriteLine($"generated item {item} at {path2}");
                 File.WriteAllText(outputFilePath, itemJson);
-                Console.WriteLine($"generated item definition: {item} at {path2}");
             }
         }
+
     }
 }

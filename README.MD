@@ -1,7 +1,6 @@
 ﻿# VaniFine 
-![Tested on](https://badge.ttsalpha.com/api?label=Tested%20on&status=25w03a&color=a64B00)
-
-![Resource Pack Version](https://badge.ttsalpha.com/api?label=Resource%20Pack%20Version&status=48&color=ddd)
+![Tested on](https://badge.ttsalpha.com/api?label=Tested%20on&status=25w04a&color=a64B00)
+![Resource Pack Version](https://badge.ttsalpha.com/api?label=Resource%20Pack%20Version&status=49&color=ddd)
 ## What's This?
 This is a small but helpful tool that allows you to convert [CIT](https://modrinth.com/mod/cit-resewn)/OptiFine resource packs to a vanilla compatible ones.
 
@@ -16,7 +15,7 @@ This is a table of what is can be ported and what is not:
 | --- | --- |
 | Items | ✅ |
 | Potions | ✅ |
-| Enchantments | ❌([MC-279504](https://bugs.mojang.com/browse/MC-279504)) |
+| Enchantments | ✅ |
 | Blocks | ⚠️(only item model) |
 | Armor | ⚠️(only item model) |
 | Entities | ❌(not supported) |
@@ -55,6 +54,8 @@ Renaming an apple to `lemon`
 Converting a pack.
 
 ![](https://github.com/DimucaTheDev/VaniFine/blob/cfc9b71d1077ab81efe2cc3307759e9a3a72553c/images/in_progress.png)
+
+
 
 ## Licensing & Redistribution
 This project is licensed under the [MIT License](LICENSE). You can use this project in your own projects, but you must credit me as the original author.
