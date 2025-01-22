@@ -49,6 +49,10 @@ Telescope. [КСЕПСП](https://www.planetminecraft.com/texture-pack/ksepsp-v9
 
 ![Renamed spyglass in item frame](https://github.com/DimucaTheDev/VaniFine/blob/cfc9b71d1077ab81efe2cc3307759e9a3a72553c/images/telescope.png)
 
+Renaming an apple to `lemon`
+
+![](https://github.com/DimucaTheDev/VaniFine/blob/21a6ebf2c9825bd98867db375fc3c5f7ad4e54cb/images/anvil.png)
+
 Converting a pack.
 
 ![](https://github.com/DimucaTheDev/VaniFine/blob/cfc9b71d1077ab81efe2cc3307759e9a3a72553c/images/in_progress.png)
