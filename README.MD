@@ -47,7 +47,7 @@ Telescope. [КСЕПСП](https://www.planetminecraft.com/texture-pack/ksepsp-v9
 
 ![Renamed spyglass in item frame](https://github.com/DimucaTheDev/VaniFine/blob/cfc9b71d1077ab81efe2cc3307759e9a3a72553c/images/telescope.png)
 
-Renaming an apple to `lemon`
+Renaming an apple to `lemon`.
 
 ![](https://github.com/DimucaTheDev/VaniFine/blob/21a6ebf2c9825bd98867db375fc3c5f7ad4e54cb/images/anvil.png)
 
@@ -55,6 +55,9 @@ Converting a pack.
 
 ![](https://github.com/DimucaTheDev/VaniFine/blob/cfc9b71d1077ab81efe2cc3307759e9a3a72553c/images/in_progress.png)
 
+Enchanted books. [Enchanted+](https://www.planetminecraft.com/texture-pack/enchantments-5637237/)
+
+![Enchanted books in creative inventory](https://github.com/DimucaTheDev/VaniFine/blob/a57096f8052472e20862fc0f507fe38f09f472f1/images/enchanted_books.png)
 
 
 ## Licensing & Redistribution
