@@ -159,6 +159,11 @@ namespace VaniFine
             v = Regex.Unescape(v);
             return v;
         }
+        private static bool IsMacFile(this ZipArchiveEntry e)
+        {
+            return e.FullName.Contains("__MACOSX");
+        }
+
         static void Main(string[] args)
         {
         start:
@@ -209,24 +214,21 @@ namespace VaniFine
                     var s = $"https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/{latestTag}/assets/minecraft/models/block/_all.json";
 
                     Console.WriteLine(requestUri);
-                    string content1 = httpClient
-                        .GetStringAsync(
-                            requestUri)
-                        .Result;
+                    var path1 = Path.Combine(Path.GetTempPath(), $"{latestTag}_items.json");
+                    string content1 = File.Exists(path1) ? File.ReadAllText(path1) : httpClient.GetStringAsync(requestUri).Result;
+                    File.WriteAllText(path1, content1);
                     AllItems = JsonDocument.Parse(content1);
 
                     Console.WriteLine(uri);
-                    string content2 = httpClient
-                        .GetStringAsync(
-                            uri)
-                        .Result;
+                    var path2 = Path.Combine(Path.GetTempPath(), $"{latestTag}_item_models.json");
+                    string content2 = File.Exists(path2) ? File.ReadAllText(path2) : httpClient.GetStringAsync(uri).Result;
+                    File.WriteAllText(path2, content2);
                     AllItemModels = JsonDocument.Parse(content2);
 
                     Console.WriteLine(s);
-                    string content3 = httpClient
-                        .GetStringAsync(
-                            s)
-                        .Result;
+                    var path3 = Path.Combine(Path.GetTempPath(), $"{latestTag}_blocks_models.json");
+                    string content3 = File.Exists(path3) ? File.ReadAllText(path3) : httpClient.GetStringAsync(s).Result;
+                    File.WriteAllText(path3, content3);
                     AllBlockModels = JsonDocument.Parse(content3);
                 }
             }
@@ -298,7 +300,7 @@ namespace VaniFine
         }
         private static void ExtractFiles(ZipArchive zipArchive, string outputPath)
         {
-            foreach (var entry in zipArchive.Entries)
+            foreach (var entry in zipArchive.Entries.Where(s => !s.IsMacFile()))
             {
                 if (entry.FullName.EndsWith("/"))
                 {
@@ -348,7 +350,7 @@ namespace VaniFine
                 }
 
                 // Textures or sounds
-                if (entry.Name.EndsWith(".mcmeta") || entry.FullName.Contains("textures")
+                if ((entry.Name.EndsWith(".mcmeta") && entry.Name != "pack.mcmeta") || entry.FullName.Contains("textures")
                     || (entry.Name.EndsWith(".png") && entry.FullName.Contains("cit")))
                 {
                     string targetPath = Path.Combine(outputPath, "assets/minecraft/textures/item", entry.Name);
@@ -363,12 +365,19 @@ namespace VaniFine
                     entry.ExtractToFile(targetPath, overwrite: true);
                     Console.WriteLine($"extracted sound {entry.Name}");
                 }
+                if (entry.FullName.Contains("lang"))
+                {
+                    string targetPath = Path.Combine(outputPath, entry.FullName);
+                    Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+                    entry.ExtractToFile(targetPath, overwrite: true);
+                    Console.WriteLine($"extracted lang file {entry.Name}");
+                }
             }
         }
         private static Dictionary<string, List<Dictionary<string, string>>> ProcessCitProperties(ZipArchive zipArchive)
         {
             var citEntries = zipArchive.Entries
-                .Where(e => e.FullName.Contains("assets/minecraft/optifine/cit") && e.Name.EndsWith(".properties") && e.Name != "cit.properties")
+                .Where(e => !e.IsMacFile() && e.FullName.Contains("assets/minecraft/optifine/cit") && e.Name.EndsWith(".properties") && e.Name != "cit.properties")
                 .ToList();
 
             var itemDefinitions = new Dictionary<string, List<Dictionary<string, string>>>();
@@ -384,8 +393,11 @@ namespace VaniFine
                     );
                 lines.Add("FILE_NAME", entry.Name);
 
+                if (lines.ContainsKey("items")) lines["items"] = lines["items"].Replace("minecraft:", "");//todo: string.Remove
+                if (lines.ContainsKey("matchItems")) lines["items"] = lines["matchItems"].Replace("minecraft:", "");//todo: string.Remove
+
                 if (!lines.ContainsKey("items") && lines.ContainsKey("matchItems"))
-                    lines["items"] = lines["matchItems"];
+                    lines["items"] = lines["matchItems"];//todo: string.Remove
 
                 if (!lines.ContainsKey("model") && !lines.ContainsKey("texture"))
                 {
@@ -421,14 +433,28 @@ namespace VaniFine
                 List<string> used = new();
                 string component = "";
 
-                string cases = string.Join(",", definitions.Select(config =>
+                Dictionary<string, List<int>> usedEnchantments = new();
+
+                string cases = string.Join(",", definitions
+                .Select(config =>
                 {
+                    if (config.Keys.Any(s => s.Contains("nbt.StoredEnchantments")))
+                    {
+                        Console.WriteLine($"SKIPPED {config["FILE_NAME"]}: TODO");
+                        return null;
+                    }
+                    if (config.ContainsKey("enchantments") && !config.ContainsKey("enchantmentIDs"))
+                    {
+                        var indexOf = config["enchantments"].IndexOf(":", StringComparison.Ordinal);
+                        config.Add("enchantmentIDs", config["enchantments"].Remove(0, indexOf + 1));
+                    }
+
                     if (string.IsNullOrWhiteSpace(component))
-                        component = config.FirstOrDefault(kvp => kvp.Key.StartsWith("nbt.")).Key?.Replace("nbt.", "").ToLower()!;
+                        component = config.FirstOrDefault(kvp => kvp.Key.StartsWith("nbt.") || kvp.Key.StartsWith("component")).Key?.Replace("nbt.", "").ToLower()!;
                     if (string.IsNullOrWhiteSpace(component) && config.ContainsKey("enchantmentIDs"))
                         component = "stored_enchantments";
 
-                    string value = config.FirstOrDefault(kvp => kvp.Key.StartsWith("nbt.")).Value;
+                    string value = config.FirstOrDefault(kvp => kvp.Key.StartsWith("nbt.") || kvp.Key.StartsWith("component")).Value;
                     if (used.Contains(value)) return null;
                     if (value == "minecraft:empty") return null;
 
@@ -443,28 +469,67 @@ namespace VaniFine
                     {
                         File.WriteAllText(
                             Path.Combine(outputPath, "assets/minecraft/models/item", $"{confFileName}.json"),
-                            SampleItemModelTemplate.Replace("ITEM", texture.Replace(".png", ""))
+                            SampleItemModelTemplate.Replace("ITEM", Path.GetFileNameWithoutExtension(texture.Replace(".png", "")))
                         );
                     }
 
                     if (!model.StartsWith("item")) model = "item/" + model;
 
-                    // Обработка enchantmentIDs
                     if (config.ContainsKey("enchantmentIDs"))
                     {
-                        var enchantments = config["enchantmentIDs"].Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                        var enchantmentCases = enchantments.SelectMany(enchantment =>
-                            Enumerable.Range(1, 5).Select(level => CaseTemplate
-                                .Replace("MODEL", $"item/{enchantment}")
-                                .Replace("WHEN", JsonSerializer.Serialize(new Dictionary<string, int>
+                        var enchantments = config["enchantmentIDs"]
+                            .Remove(0, config["enchantmentIDs"].IndexOf(":", StringComparison.Ordinal) + 1)
+                            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                            .DistinctBy(s => s); // Удаляем дубликаты внутри одной конфигурации.
+
+                        var enchantmentCases = enchantments
+                            .SelectMany(enchantment =>
+                            {
+                                // спасите меня бля пожалуйста
+                                if (config.ContainsKey("enchantmentLevels"))
                                 {
-                            { $"minecraft:{enchantment}", level }
-                                }))));
+                                    var level = int.Parse(config["enchantmentLevels"].Split(' ')[0]);
+                                    if (usedEnchantments.TryGetValue(enchantment, out var levels) && levels.Contains(level)) return null;
+                                    if (!usedEnchantments.ContainsKey(enchantment))
+                                        usedEnchantments.Add(enchantment, [level]);
+                                    else
+                                        usedEnchantments[enchantment].Add(level);
+                                    return new List<string>()
+                                        {
+                                            CaseTemplate
+                                                .Replace("MODEL", $"item/{(config.TryGetValue("texture", out var value1) ? Path.GetFileNameWithoutExtension(value1) : enchantment)}{"" /*_level{level}*/}")
+                                                .Replace("WHEN", JsonSerializer.Serialize(new Dictionary<string, int> { { $"minecraft:{enchantment}", level } }))
+                                        };
+                                }
+
+                                return Enumerable.Range(1, 5).Select(s =>
+                                {
+                                    if (usedEnchantments.TryGetValue(enchantment, out var levels) && levels.Contains(s)) return null;
+                                    if (!usedEnchantments.ContainsKey(enchantment))
+                                        usedEnchantments.Add(enchantment, [s]);
+                                    else
+                                        usedEnchantments[enchantment].Add(s);
+
+                                    return CaseTemplate
+                                        .Replace("MODEL",
+                                            $"item/{(config.TryGetValue("texture", out var value1) ? Path.GetFileNameWithoutExtension(value1) : enchantment)}{"" /*_level{level}*/}")
+                                        .Replace("WHEN", JsonSerializer.Serialize(new Dictionary<string, int>
+                                        {
+                                            {
+                                                $"minecraft:{enchantment}", s
+                                            }
+                                        }));
+                                });
+                            })
+                                .Where(caseString => caseString != null);
+
 
                         used.Add(config["enchantmentIDs"]);
+                        File.AppendAllText(allNames, $"\t{i}.{j++}) minecraft:{config["enchantmentIDs"]}\r\n");
                         return string.Join(",", enchantmentCases);
                     }
 
+                    File.AppendAllText(allNames, $"\t{i}.{j++}) {value.GetName()}\r\n");
                     used.Add(value);
                     return CaseTemplate
                         .Replace("MODEL", model)
@@ -473,7 +538,8 @@ namespace VaniFine
                             {
                                 "potion_contents" or "potion" => new Dictionary<string, string> { { "potion", value } },
                                 "display.name" => value.GetName(),
-                                //new Dictionary<string, string> { { component, value } }
+                                "components.entity_data.variant" => value,
+                                //"stored_enchantments" => new Dictionary<string, string> { { component, value } },
                                 _ => throw new NotImplementedException($"Unknown component type: {component}")
                             }), new JsonSerializerOptions() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
                 }).Where(s => s is not null));
@@ -485,6 +551,7 @@ namespace VaniFine
                         {
                             "potion" => "minecraft:potion_contents",
                             "display.name" => "minecraft:custom_name",
+                            "components.entity_data.variant" => "minecraft:painting/variant",
                             "stored_enchantments" => "minecraft:stored_enchantments",
                             _ => throw new NotImplementedException($"Unknown component type: {component}")
                         })
@@ -496,6 +563,7 @@ namespace VaniFine
                 var path2 = $"assets/minecraft/items/{item}.json";
                 string outputFilePath = Path.Combine(outputPath, path2);
                 Console.WriteLine($"generated item {item} at {path2}");
+
                 File.WriteAllText(outputFilePath, itemJson);
             }
         }

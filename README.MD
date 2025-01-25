@@ -32,7 +32,7 @@ expressions like `iregex:(Text A | Text B)` will be replaced with `Text A`, and 
 5. \*magic happens*
 
 As a result a new folder will be created in `.minecraft/resourcepacks` with the converted resource pack.
-And as a bonus, a `names.txt` file will be created in that folder, with all available item names.
+And as a bonus, a `names.txt` file will be created in that folder, with all available item names/enchantments.
 
 # Gallery
 Poster on a wall. [КСЕПСП](https://www.planetminecraft.com/texture-pack/ksepsp-v9-optifine-cit/)
@@ -59,6 +59,11 @@ Enchanted books. [Enchanted+](https://www.planetminecraft.com/texture-pack/encha
 
 ![Enchanted books in creative inventory](https://github.com/DimucaTheDev/VaniFine/blob/a57096f8052472e20862fc0f507fe38f09f472f1/images/enchanted_books.png)
 
-
+## TODO:
+- Get back animations for bows and crossbows
+- Fix armor item model
+- Code cleanup
+- Parse this: `nbt.StoredEnchantments.0.id=pattern:*`
+ 
 ## Licensing & Redistribution
 This project is licensed under the [MIT License](LICENSE). You can use this project in your own projects, but you must credit me as the original author.
