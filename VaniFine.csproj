@@ -8,14 +8,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="_Program.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="_Program.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="newtonsoft.json" Version="13.0.3" />
   </ItemGroup>
 
