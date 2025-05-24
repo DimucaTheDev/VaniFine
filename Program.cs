@@ -28,7 +28,7 @@ namespace VaniFine
 
         private const string UserAgent = "VaniFine";
         private const string MapLink = "https://vf.cmdev.pw/map";
-        private const string MinimumVersion = "25w03a";
+        private const string MinimumVersion = "1.21.5";
 
         static void Main(string[] args)
         {
@@ -165,7 +165,7 @@ namespace VaniFine
         public static void ExtractItemModels(ZipArchiveEntry entry)
         {
             string targetPath = Path.Combine(NewPackPath, "assets/minecraft/models/item", entry.Name);
-            Console.WriteLine($"Extracted model {targetPath.Replace(NewPackPath, "")}");
+            Console.WriteLine($"Extracted model   {targetPath.Replace(NewPackPath, "").Replace("\\", "/")}");
 
             using StreamReader stream = new StreamReader(entry.Open());
             Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
@@ -261,9 +261,12 @@ namespace VaniFine
             }
 
             var itemsRaw = GetSanitizedItemsKey();
-            if (itemsRaw == null) return;
+            if (itemsRaw == null)
+            {
+                Console.WriteLine("No item names defined for this entry: " + entry.FullName);
+                return;
+            }
             lines["items"] = itemsRaw;
-
             if (!lines.ContainsKey("model") && !lines.ContainsKey("texture"))
             {
                 var pngName = Path.GetFileNameWithoutExtension(entry.FullName) + ".png";
@@ -331,8 +334,10 @@ namespace VaniFine
                     continue;
                 }
 
-                string model = GenerateModelName(config);
-                string caseString = GenerateCase(model, component, value);
+                string model = config["items"].Split(' ').Contains("bow")
+                    ? GenerateBowModelName(config)
+                    : GenerateModelName(config);
+                string caseString = GenerateCase(model, component, value, config);
                 cases.Add(caseString);
                 File.AppendAllText(allNames, $"\t{itemIndex}.{variantIndex++}) {value.GetName()}\r\n");
             }
@@ -340,7 +345,7 @@ namespace VaniFine
             string output = CreateItemJson(item, component, cases);
             string outputFilePath = Path.Combine(NewPackPath, $"assets/minecraft/items/{item}.json");
             File.WriteAllText(outputFilePath, output);
-            Console.WriteLine($"generated item {item} at assets/minecraft/items/{item}.json");
+            Console.WriteLine($"Generated item    {item} at assets/minecraft/items/{item}.json");
         }
         public static void ProcessEnchantmentKeys(Dictionary<string, string> config)
         {
@@ -367,6 +372,23 @@ namespace VaniFine
             model = Path.GetFileName(model);
 
             if (!config.ContainsKey("model") && config.TryGetValue("texture", out var texture))
+            {
+                File.WriteAllText(
+                    Path.Combine(NewPackPath, "assets/minecraft/models/item", $"{confFileName}.json"),
+                    Templates.SampleItemModelTemplate.Replace("ITEM", Path.GetFileNameWithoutExtension(texture.Replace(".png", "")))
+                );
+            }
+
+            return model.StartsWith("item") ? model : "item/" + model;
+        }
+
+        public static string GenerateBowModelName(Dictionary<string, string> config)
+        {
+            string confFileName = Path.GetFileNameWithoutExtension(config["FILE_NAME"]);
+            string model = config.FirstOrDefault(kvp => kvp.Key.ToLower().StartsWith("model.bow_standby")).Value?.Replace(" ", "").Replace(".json", "") ?? $"item/{confFileName}";
+            model = Path.GetFileName(model);
+
+            if (!config.ContainsKey("model.bow_standby") && config.TryGetValue("texture", out var texture))
             {
                 File.WriteAllText(
                     Path.Combine(NewPackPath, "assets/minecraft/models/item", $"{confFileName}.json"),
@@ -411,7 +433,7 @@ namespace VaniFine
                 }
             }
         }
-        public static string GenerateCase(string model, string component, string value)
+        public static string GenerateCase(string model, string component, string value, Dictionary<string, string> config)
         {
             object whenCondition = component switch
             {
@@ -421,9 +443,27 @@ namespace VaniFine
                 _ => throw new NotImplementedException($"Unknown component type: {component}")
             };
 
-            return Templates.CaseTemplate
-                .Replace("MODEL", model)
-                .Replace("WHEN", JsonSerializer.Serialize(whenCondition, new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+            var whenValue = JsonSerializer.Serialize(whenCondition, new JsonSerializerOptions
+            {
+                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            });
+
+            if (config["items"].Split(' ').Contains("bow"))
+            {
+                var a = Templates.CaseBowTemplate
+                    .Replace("MODEL", model)
+                    .Replace("PULLING_0", config["model.bow_pulling_0"])
+                    .Replace("PULLING_1", config["model.bow_pulling_1"])
+                    .Replace("PULLING_2", config["model.bow_pulling_2"])
+                    .Replace("WHEN", whenValue);
+                return a;
+            }
+            else
+            {
+                return Templates.CaseTemplate
+                    .Replace("MODEL", model)
+                    .Replace("WHEN", whenValue);
+            }
         }
         public static string CreateItemJson(string item, string component, List<string> cases)
         {
@@ -450,7 +490,7 @@ namespace VaniFine
         {
             return AllItemsJsonDocument.RootElement.TryGetProperty(item, out var value)
                 ? value.GetProperty("model").GetRawText()[1..^1] // remove '{' and '}'. do not use Trim()!!
-                : $"\"type\": \"minecraft:model\",\r\n            \"model\": \"minecraft:item/{item}\""; //default item model
+               /*move to templates*/ : $"\"type\": \"minecraft:model\",\r\n            \"model\": \"minecraft:item/{item}\""; //default item model
         }
         public static string GetString(this HttpClient client, string url)
         {
