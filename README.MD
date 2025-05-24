@@ -62,10 +62,8 @@ Enchanted books. [Enchanted+](https://www.planetminecraft.com/texture-pack/encha
 
 ![Enchanted books in creative inventory](https://github.com/DimucaTheDev/VaniFine/blob/a57096f8052472e20862fc0f507fe38f09f472f1/images/enchanted_books.png)
 
-## TODO:
-- Get back animations for bows and crossbows
-- Fix armor item model
-- Code cleanup
+## TODO: 
+- Add armor support (using datapack)
 - Parse this: `nbt.StoredEnchantments.0.id=pattern:*`
  
 ## Licensing & Redistribution

@@ -38,12 +38,14 @@ namespace VaniFine
             if (string.IsNullOrEmpty(RPPath))
             {
                 Console.WriteLine("No file selected.");
+                Thread.Sleep(5000);
                 return;
             }
             Console.WriteLine($"Selected file: {RPPath}");
             if (!VerifyPack())
             {
                 Console.WriteLine("Pack validation failed! Is this a valid resource pack?");
+                Thread.Sleep(5000);
                 return;
             }
 
@@ -70,6 +72,9 @@ namespace VaniFine
             ExtractFiles();
             var files = ProcessCitProperties();
             GenerateItemJsonFiles(files);
+
+            Console.WriteLine("\nResource pack converted! Path: " + NewPackPath);
+            Thread.Sleep(5000);
         }
 
         public static bool VerifyPack()
@@ -109,8 +114,8 @@ namespace VaniFine
         }
         public static string GenerateOutputPath()
         {
-            //string path = $"{Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)}/.minecraft/resourcepacks/GEN{new Random().Next(10000)}";
-            string path = Path.GetFullPath($"test/{new Random().Next(1, 1000)}");
+            string path = $"{Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)}/.minecraft/resourcepacks/VF_{Path.GetFileNameWithoutExtension(RPPath)}";
+            //string path = Path.GetFullPath($"test/{new Random().Next(1, 1000)}");
             Console.WriteLine($"New Pack directory: {path}");
             Directory.CreateDirectory(path);
             //todo: non-minecraft id's
@@ -346,7 +351,8 @@ namespace VaniFine
                     model = GenerateCrossbowModelName(config);
                 else
                     model = GenerateModelName(config);
-                string caseString = GenerateCase(model, component, value, config);
+                string? caseString = GenerateCase(model, component, value, config);
+                if (caseString == null) continue;
                 cases.Add(caseString);
                 File.AppendAllText(allNames, $"\t{itemIndex}.{variantIndex++}) {value.GetName()}\r\n");
             }
@@ -459,7 +465,14 @@ namespace VaniFine
                 textures["layer0"] = texture;
             }
             else
-                Console.WriteLine($"Unable to combine model and texture for '{config["model"]}' and '{config["texture"]}' ({config["FILE_NAME"]})");
+            {
+                //json.Add("textures", new JsonObject() { { "layer0", texture } });
+
+                var c = Console.ForegroundColor;
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"[!] Unable to combine model and texture for '{config["model"]}' and '{config["texture"]}' ({config["FULL_FILE_NAME"]})");
+                Console.ForegroundColor = c;
+            }
 
             var a = json.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
             return a;
@@ -499,15 +512,27 @@ namespace VaniFine
                 }
             }
         }
-        public static string GenerateCase(string model, string component, string value, Dictionary<string, string> config)
+        public static string? GenerateCase(string model, string component, string value, Dictionary<string, string> config)
         {
-            object whenCondition = component switch
+            object whenCondition;
+            try
             {
-                "potion" or "potion_contents" => new Dictionary<string, string> { { "potion", value } },
-                "display.name" => value.GetName(),
-                "components.entity_data.variant" => value,
-                _ => throw new NotImplementedException($"Unknown component type: {component}")
-            };
+                whenCondition = component switch
+                {
+                    "potion" or "potion_contents" => new Dictionary<string, string> { { "potion", value } },
+                    "display.name" => value.GetName(),
+                    "components.entity_data.variant" => value,
+                    _ => throw new NotImplementedException($"Unknown component type: {component}")
+                };
+            }
+            catch (Exception e)
+            {
+                var c = Console.ForegroundColor;
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"[!] Unable to process the config: {config["FULL_FILE_NAME"]}  :  {e.Message}");
+                Console.ForegroundColor = c;
+                return null!;
+            }
 
             var whenValue = JsonSerializer.Serialize(whenCondition, new JsonSerializerOptions
             {
