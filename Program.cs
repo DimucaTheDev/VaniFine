@@ -1,7 +1,6 @@
 ﻿using System.IO.Compression;
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace VaniFine
@@ -451,32 +450,10 @@ namespace VaniFine
         }
         public static string CombineModels(Dictionary<string, string> config)
         {
-            config["model"] = config["model"].Replace("./", "");
-            var path = (config["model"].StartsWith("optifine"/*root*/)
-                ? $"assets/minecraft/{config["model"]}"
-                : Path.GetDirectoryName(config["FULL_FILE_NAME"])!.Replace("\\", "/") + $"/{config["model"]}");
-            path = path.EndsWith(".json") ? path : path + ".json";
-            string srcModel = Zip.GetEntry(path).GetString();
-            string texture = "item/" + config["texture"];
-
-            var json = JsonNode.Parse(srcModel).AsObject();
-
-            if (json["textures"] is JsonObject textures)
-            {
-                textures["layer0"] = texture;
-            }
-            else
-            {
-                //json.Add("textures", new JsonObject() { { "layer0", texture } });
-
-                var c = Console.ForegroundColor;
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine($"[!] Unable to combine model and texture for '{config["model"]}' and '{config["texture"]}' ({config["FULL_FILE_NAME"]})");
-                Console.ForegroundColor = c;
-            }
-
-            var a = json.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
-            return a;
+            var parent = Path.GetFileNameWithoutExtension(config["model"]);
+            var texture = config["texture"].Replace(".png", "");
+            var model = Templates.Combined.Replace("PARENT", parent).Replace("TEXTURE", texture);
+            return model;
         }
         public static IEnumerable<string> GenerateEnchantmentCases(Dictionary<string, string> config, Dictionary<string, List<int>> usedEnchantments)
         {
@@ -518,11 +495,14 @@ namespace VaniFine
             object whenCondition;
             try
             {
+                if (config["type"] == "armor") throw new NotImplementedException("Armor generation is not implemented");
+
                 whenCondition = component switch
                 {
                     "potion" or "potion_contents" => new Dictionary<string, string> { { "potion", value } },
                     "display.name" => value.GetName(),
                     "components.entity_data.variant" => value,
+                    "instrument" => value,
                     _ => throw new NotImplementedException($"Unknown component type: {component}")
                 };
             }
@@ -584,6 +564,7 @@ namespace VaniFine
                     "display.name" => "minecraft:custom_name",
                     "components.entity_data.variant" => "minecraft:painting/variant",
                     "stored_enchantments" => "minecraft:stored_enchantments",
+                    "instrument" => "minecraft:instrument",
                     _ => throw new NotImplementedException($"Unknown component type: {component}")
                 };
             }

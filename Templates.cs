@@ -19,6 +19,15 @@
             }
             """;
 
+        public static readonly string Combined =
+            """
+            {
+              "parent": "item/PARENT",
+              "textures": {
+                "layer0": "item/TEXTURE"
+              } 
+            }
+            """;
         public static readonly string CaseTemplate =
             """
             {
