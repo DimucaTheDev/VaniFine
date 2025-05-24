@@ -1,6 +1,7 @@
 ﻿using System.IO.Compression;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace VaniFine
@@ -241,6 +242,7 @@ namespace VaniFine
                     .ToDictionary(parts => parts[0], parts => parts[1].Replace("\r", ""));
 
                 lines["FILE_NAME"] = entry.Name;
+                lines["FULL_FILE_NAME"] = entry.FullName;
                 ProcessCitEntry(lines, entry, itemDefinitions);
             }
 
@@ -385,7 +387,13 @@ namespace VaniFine
                     Templates.SampleItemModelTemplate.Replace("ITEM", Path.GetFileNameWithoutExtension(texture.Replace(".png", "")))
                 );
             }
-
+            if (config.ContainsKey("model") && config.ContainsKey("texture"))
+            {
+                File.WriteAllText(
+                    Path.Combine(NewPackPath, "assets/minecraft/models/item", $"{confFileName}_combined.json"),
+                    CombineModels(config));
+                model = $"{confFileName}_combined";
+            }
             return model.StartsWith("item") ? model : "item/" + model;
         }
 
@@ -402,7 +410,13 @@ namespace VaniFine
                     Templates.SampleItemModelTemplate.Replace("ITEM", Path.GetFileNameWithoutExtension(texture.Replace(".png", "")))
                 );
             }
-
+            if (config.ContainsKey("model") && config.ContainsKey("texture"))
+            {
+                File.WriteAllText(
+                    Path.Combine(NewPackPath, "assets/minecraft/models/item", $"{confFileName}_combined.json"),
+                    CombineModels(config));
+                model = $"{confFileName}_combined";
+            }
             return model.StartsWith("item") ? model : "item/" + model;
         }
         public static string GenerateCrossbowModelName(Dictionary<string, string> config)
@@ -419,7 +433,36 @@ namespace VaniFine
                 );
             }
 
+            if (config.ContainsKey("model") && config.ContainsKey("texture"))
+            {
+                File.WriteAllText(
+                    Path.Combine(NewPackPath, "assets/minecraft/models/item", $"{confFileName}_combined.json"),
+                    CombineModels(config));
+                model = $"{confFileName}_combined";
+            }
             return model.StartsWith("item") ? model : "item/" + model;
+        }
+        public static string CombineModels(Dictionary<string, string> config)
+        {
+            config["model"] = config["model"].Replace("./", "");
+            var path = (config["model"].StartsWith("optifine"/*root*/)
+                ? $"assets/minecraft/{config["model"]}"
+                : Path.GetDirectoryName(config["FULL_FILE_NAME"])!.Replace("\\", "/") + $"/{config["model"]}");
+            path = path.EndsWith(".json") ? path : path + ".json";
+            string srcModel = Zip.GetEntry(path).GetString();
+            string texture = "item/" + config["texture"];
+
+            var json = JsonNode.Parse(srcModel).AsObject();
+
+            if (json["textures"] is JsonObject textures)
+            {
+                textures["layer0"] = texture;
+            }
+            else
+                Console.WriteLine($"Unable to combine model and texture for '{config["model"]}' and '{config["texture"]}' ({config["FILE_NAME"]})");
+
+            var a = json.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+            return a;
         }
         public static IEnumerable<string> GenerateEnchantmentCases(Dictionary<string, string> config, Dictionary<string, List<int>> usedEnchantments)
         {
