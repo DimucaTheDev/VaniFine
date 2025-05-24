@@ -334,9 +334,16 @@ namespace VaniFine
                     continue;
                 }
 
-                string model = config["items"].Split(' ').Contains("bow")
-                    ? GenerateBowModelName(config)
-                    : GenerateModelName(config);
+                var items = config["items"].Split(' ');
+
+                string model = "";
+
+                if (items.Contains("bow"))
+                    model = GenerateBowModelName(config);
+                else if (items.Contains("crossbow"))
+                    model = GenerateCrossbowModelName(config);
+                else
+                    model = GenerateModelName(config);
                 string caseString = GenerateCase(model, component, value, config);
                 cases.Add(caseString);
                 File.AppendAllText(allNames, $"\t{itemIndex}.{variantIndex++}) {value.GetName()}\r\n");
@@ -389,6 +396,22 @@ namespace VaniFine
             model = Path.GetFileName(model);
 
             if (!config.ContainsKey("model.bow_standby") && config.TryGetValue("texture", out var texture))
+            {
+                File.WriteAllText(
+                    Path.Combine(NewPackPath, "assets/minecraft/models/item", $"{confFileName}.json"),
+                    Templates.SampleItemModelTemplate.Replace("ITEM", Path.GetFileNameWithoutExtension(texture.Replace(".png", "")))
+                );
+            }
+
+            return model.StartsWith("item") ? model : "item/" + model;
+        }
+        public static string GenerateCrossbowModelName(Dictionary<string, string> config)
+        {
+            string confFileName = Path.GetFileNameWithoutExtension(config["FILE_NAME"]);
+            string model = config.FirstOrDefault(kvp => kvp.Key.ToLower().StartsWith("model.bow_standby")).Value?.Replace(" ", "").Replace(".json", "") ?? $"item/{confFileName}";
+            model = Path.GetFileName(model);
+
+            if (!config.ContainsKey("model") && config.TryGetValue("texture", out var texture))
             {
                 File.WriteAllText(
                     Path.Combine(NewPackPath, "assets/minecraft/models/item", $"{confFileName}.json"),
@@ -452,9 +475,21 @@ namespace VaniFine
             {
                 var a = Templates.CaseBowTemplate
                     .Replace("MODEL", model)
-                    .Replace("PULLING_0", config["model.bow_pulling_0"])
-                    .Replace("PULLING_1", config["model.bow_pulling_1"])
-                    .Replace("PULLING_2", config["model.bow_pulling_2"])
+                    .Replace("PULLING_0", config.Get("model.bow_pulling_0", model))
+                    .Replace("PULLING_1", config.Get("model.bow_pulling_1", model))
+                    .Replace("PULLING_2", config.Get("model.bow_pulling_2", model))
+                    .Replace("WHEN", whenValue);
+                return a;
+            }
+            if (config["items"].Split(' ').Contains("crossbow"))
+            {
+                var a = Templates.CaseCrossbowTemplate
+                    .Replace("MODEL", model)
+                    .Replace("PULLING_0", config.Get("model.crossbow_pulling_0", model))
+                    .Replace("PULLING_1", config.Get("model.crossbow_pulling_1", model))
+                    .Replace("PULLING_2", config.Get("model.crossbow_pulling_2", model))
+                    .Replace("ARROW", config.Get("model.crossbow_arrow", model))
+                    .Replace("FIREWORK", config.Get("model.crossbow_firework", model))
                     .Replace("WHEN", whenValue);
                 return a;
             }
@@ -517,6 +552,12 @@ namespace VaniFine
             v = v.Replace("ipattern:", "").Replace("pattern:", "").Replace("iregex:", "").Replace("regex:", "");
             v = Regex.Unescape(v).Replace(".*", "");
             return v;
+        }
+
+        private static string Get(this Dictionary<string, string> dic, string key, string? def = null)
+        {
+            if (dic.TryGetValue(key, out var value)) return value;
+            return def;
         }
         private static string ProcessRegexInput(string input)
         {

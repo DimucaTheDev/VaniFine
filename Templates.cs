@@ -30,6 +30,64 @@
             }
             """;
 
+        public static readonly string CaseCrossbowTemplate =
+            """
+            {
+              "model": {
+                "type": "minecraft:select",
+                "cases": [
+                  {
+                    "model": {
+                      "type": "minecraft:model",
+                      "model": "minecraft:item/ARROW"
+                    },
+                    "when": "arrow"
+                  },
+                  {
+                    "model": {
+                      "type": "minecraft:model",
+                      "model": "minecraft:item/FIREWORK"
+                    },
+                    "when": "rocket"
+                  }
+                ],
+                "fallback": {
+                  "type": "minecraft:condition",
+                  "on_false": {
+                    "type": "minecraft:model",
+                    "model": "minecraft:MODEL"
+                  },
+                  "on_true": {
+                    "type": "minecraft:range_dispatch",
+                    "entries": [
+                      {
+                        "model": {
+                          "type": "minecraft:model",
+                          "model": "minecraft:item/PULLING_1"
+                        },
+                        "threshold": 0.58
+                      },
+                      {
+                        "model": {
+                          "type": "minecraft:model",
+                          "model": "minecraft:item/PULLING_2"
+                        },
+                        "threshold": 1.0
+                      }
+                    ],
+                    "fallback": {
+                      "type": "minecraft:model",
+                      "model": "minecraft:item/PULLING_0"
+                    },
+                    "property": "minecraft:crossbow/pull"
+                  },
+                  "property": "minecraft:using_item"
+                },
+                "property": "minecraft:charge_type"
+              },
+                "when": WHEN
+            }
+            """;
         public static readonly string CaseBowTemplate =
             """
             {
