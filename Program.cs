@@ -324,6 +324,14 @@ namespace VaniFine
             string component = "";
             string? output = "";
 
+            foreach (var d in definitions)
+            {
+                if (d.TryGetValue("nbt.Damage", out var v))
+                    d["damage"] = v;
+                if (d.TryGetValue("nbt.damage", out var v2))
+                    d["damage"] = v2;
+            }
+
             if (!definitions.All(s => s.ContainsKey("damage"))) // use "type": "minecraft:select",
             {
                 foreach (var config in definitions)
@@ -603,6 +611,7 @@ namespace VaniFine
                     "display.name" => value.GetName(),
                     "components.entity_data.variant" => value,
                     "instrument" => value,
+                    "damage" => throw new InvalidOperationException($"Can not use both DAMAGE and another component on one item"),
                     _ => throw new NotImplementedException($"Unknown component type: {component}")
                 };
                 if ((component is
