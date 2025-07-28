@@ -257,8 +257,8 @@ namespace VaniFine
                 var lines = stringsEnumerable
                     .ToDictionary(parts => parts[0], parts => parts[1].Replace("\r", ""));
 
-                lines["FILE_NAME"] = entry.Name;
-                lines["FULL_FILE_NAME"] = entry.FullName;
+                lines["FILE_NAME"] = entry.Name.ToLower();
+                lines["FULL_FILE_NAME"] = entry.FullName.ToLower();
                 ProcessCitEntry(lines, entry, itemDefinitions);
             }
 
@@ -342,10 +342,10 @@ namespace VaniFine
                         component = "stored_enchantments";
 
                     var value = ExtractComponentValue(config);
-                    if (string.IsNullOrWhiteSpace(value) || usedVariants.Contains(value) || value == "minecraft:empty")
+                    if (string.IsNullOrWhiteSpace(value) || usedVariants.Contains(value.GetName()) || value == "minecraft:empty")
                         continue;
 
-                    usedVariants.Add(value);
+                    usedVariants.Add(value.GetName());
 
                     if (config.ContainsKey("enchantmentIDs"))
                     {
@@ -366,7 +366,7 @@ namespace VaniFine
                         model = GenerateCrossbowModelName(config);
                     else
                         model = GenerateModelName(config);
-                    string? caseString = GenerateCase(model, component, value, config);
+                    string? caseString = GenerateCase(model.ToLower(), component, value, config);
                     if (caseString == null)
                         continue;
                     cases.Add(caseString);
@@ -402,7 +402,7 @@ namespace VaniFine
                         model = GenerateCrossbowModelName(definition);
                     else
                         model = GenerateModelName(definition);
-                    entry = entry.Replace("MODEL", GenerateRangedModel(model, definition));
+                    entry = entry.Replace("MODEL", GenerateRangedModel(model.ToLower(), definition));
 
                     entries.Add(((defTo / max), entry));
                 }
@@ -651,12 +651,10 @@ namespace VaniFine
                     .Replace("WHEN", whenValue);
                 return a;
             }
-            else
-            {
-                return Templates.CaseTemplate
-                    .Replace("MODEL", model)
-                    .Replace("WHEN", whenValue);
-            }
+
+            return Templates.CaseTemplate
+                .Replace("MODEL", model)
+                .Replace("WHEN", whenValue);
         }
 
         public static string? GenCrossbowPullModel(Dictionary<string, string> config, int pullingIndex)

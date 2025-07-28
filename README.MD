@@ -1,5 +1,5 @@
 ﻿# VaniFine 
-![Tested on](https://badge.ttsalpha.com/api?label=Tested%20on&status=1.21.5&color=009E00)
+![Tested on](https://badge.ttsalpha.com/api?label=Tested%20on&status=1.21.8&color=009E00)
 ![Resource Pack Version](https://badge.ttsalpha.com/api?label=Resource%20Pack%20Version&status=55&color=ddd)
 ## What's This?
 This is a small but helpful tool that allows you to convert [CIT](https://modrinth.com/mod/cit-resewn)/OptiFine resource packs to a vanilla compatible ones.
@@ -17,12 +17,13 @@ This is a table of what is can be ported and what is not:
 | Potions | ✅ |
 | Enchantments | ✅ |
 | Bows/Crossbows | ✅ |
+| Item Damage* | ✅ |
 | Blocks | ⚠️(only item model) |
-| Armor | Planned* |
+| Armor | Planned** |
 | Entities | ❌(not supported) |
 | Paintings | ⚠️(only item model) |
-
-* For armor models, you will probably need to install generated datapack in world folder, + obtaining these armor items will require operator permissions (to execute `/give` command)
+* Either `damage` or `component` can be used at once. You can't mix both *now*.
+* * For armor models, you will probably need to install generated datapack in world folder, + obtaining these armor items will require operator permissions (to execute `/give` command)
 
 #### What about Regular Expressions?
 expressions like `iregex:(Text A | Text B)` will be replaced with `Text A`, and case-insensitivity is **not supported**.
