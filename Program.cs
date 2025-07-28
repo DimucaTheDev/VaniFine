@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using VaniFine.Properties;
 
 namespace VaniFine
 {
@@ -51,8 +52,17 @@ namespace VaniFine
 
             Http = new HttpClient();
             Http.DefaultRequestHeaders.Add("User-Agent", UserAgent);
-            //todo: select latest version from Mojang version manifest
-            var response = Http.GetString(MapLink);
+            string response;
+            try
+            {
+                response = Http.GetString(MapLink);
+            }
+            catch
+            {
+                Console.WriteLine("Unable to get version map from server. using local copy...");
+                response = Resources.map;
+            }
+
             VersionMap = JsonDocument.Parse(response).RootElement
                 .EnumerateObject()
                 .ToDictionary(s => s.Name, s => s.Value.GetInt32());
