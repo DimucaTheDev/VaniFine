@@ -1,4 +1,5 @@
-﻿using System.IO.Compression;
+﻿using System.Globalization;
+using System.IO.Compression;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -58,7 +59,7 @@ namespace VaniFine
 
             var pack = GetPackMeta();
             var version =
-                VersionMap.First(s => s.Value == Math.Max(VersionMap[MinimumVersion], pack.Version));
+                VersionMap.First(s => s.Value == Math.Max(VersionMap[MinimumVersion], Math.Min(pack.Version, VersionMap.Max(s => s.Value))));
             Console.WriteLine($"Pack version: {pack.Version}");
             Console.WriteLine($"New Pack version: {version.Value} ({version.Key})");
             NewMinecraftVersion = version.Key;
@@ -126,7 +127,8 @@ namespace VaniFine
         public static void ExtractPackIcon()
         {
             var packEntry = Zip.GetEntry("pack.png");
-            if (packEntry is null) return;
+            if (packEntry is null)
+                return;
             packEntry.ExtractToFile(Path.Combine(NewPackPath, "pack.png"), overwrite: true);
             Console.WriteLine("pack.png Extracted");
         }
@@ -154,7 +156,7 @@ namespace VaniFine
                 if (entry.FullName.EndsWith("/"))
                     continue;
 
-                if (entry.FullName.Contains("/models/") || (entry.Name.EndsWith(".json") && entry.FullName.Contains("/cit/")))
+                if (entry.Name.EndsWith(".json") && (entry.FullName.Contains("/models/") || entry.FullName.Contains("/cit/")))
                     ExtractItemModels(entry);
 
                 if ((entry.Name.EndsWith(".mcmeta") && entry.Name != "pack.mcmeta") || entry.FullName.Contains("/textures/") || (entry.Name.EndsWith(".png") && entry.FullName.Contains("/cit/")))
@@ -238,11 +240,21 @@ namespace VaniFine
             {
                 using var reader = new StreamReader(entry.Open());
                 var readToEnd = reader.ReadToEnd();
-                var lines = readToEnd.Split('\n')
+                if (readToEnd.Contains("CustomPotionEffects:"))
+                {
+                    var c = Console.ForegroundColor;
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine($"[!] Skipped config: {entry.FullName}  :  'CustomPotionEffects' parsing is not implemented");
+                    Console.ForegroundColor = c;
+                    continue;
+                }
+                var stringsEnumerable = readToEnd.Split('\n')
                     .Select(line => line.Trim())
+                    .Where(line => !line.StartsWith("CustomPotionEffects:"))
                     .DistinctBy(s => s.Split('=')[0])
                     .Where(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith("#"))
-                    .Select(line => line.Split('=', 2))
+                    .Select(line => line.Split('=', 2));
+                var lines = stringsEnumerable
                     .ToDictionary(parts => parts[0], parts => parts[1].Replace("\r", ""));
 
                 lines["FILE_NAME"] = entry.Name;
@@ -310,54 +322,96 @@ namespace VaniFine
             var usedVariants = new HashSet<string>();
             var cases = new List<string>();
             string component = "";
+            string? output = "";
 
-            foreach (var config in definitions)
+            if (!definitions.All(s => s.ContainsKey("damage"))) // use "type": "minecraft:select",
             {
-                if (config.Keys.Any(k => k.Contains("nbt.StoredEnchantments")))
+                foreach (var config in definitions)
                 {
-                    Console.WriteLine($"SKIPPED {config["FILE_NAME"]}: TODO");
-                    continue;
+                    if (config.Keys.Any(k => k.Contains("nbt.StoredEnchantments")))
+                    {
+                        Console.WriteLine($"SKIPPED {config["FILE_NAME"]}: TODO");
+                        continue;
+                    }
+
+                    ProcessEnchantmentKeys(config);
+
+                    if (string.IsNullOrWhiteSpace(component))
+                        component = DetectComponent(config);
+                    if (string.IsNullOrWhiteSpace(component) && config.ContainsKey("enchantmentIDs"))
+                        component = "stored_enchantments";
+
+                    var value = ExtractComponentValue(config);
+                    if (string.IsNullOrWhiteSpace(value) || usedVariants.Contains(value) || value == "minecraft:empty")
+                        continue;
+
+                    usedVariants.Add(value);
+
+                    if (config.ContainsKey("enchantmentIDs"))
+                    {
+                        var enchantmentCases = GenerateEnchantmentCases(config, usedEnchantments);
+                        cases.AddRange(enchantmentCases);
+                        File.AppendAllText(allNames,
+                            $"\t{itemIndex}.{variantIndex++}) minecraft:{config["enchantmentIDs"]}\r\n");
+                        continue;
+                    }
+
+                    var items = config["items"].Split(' ');
+
+                    string model = "";
+
+                    if (items.Contains("bow"))
+                        model = GenerateBowModelName(config);
+                    else if (items.Contains("crossbow"))
+                        model = GenerateCrossbowModelName(config);
+                    else
+                        model = GenerateModelName(config);
+                    string? caseString = GenerateCase(model, component, value, config);
+                    if (caseString == null)
+                        continue;
+                    cases.Add(caseString);
+                    File.AppendAllText(allNames, $"\t{itemIndex}.{variantIndex++}) {value.GetName()}\r\n");
                 }
-
-                ProcessEnchantmentKeys(config);
-
-                if (string.IsNullOrWhiteSpace(component))
-                    component = DetectComponent(config);
-                if (string.IsNullOrWhiteSpace(component) && config.ContainsKey("enchantmentIDs"))
-                    component = "stored_enchantments";
-
-                var value = ExtractComponentValue(config);
-                if (string.IsNullOrWhiteSpace(value) || usedVariants.Contains(value) || value == "minecraft:empty")
-                    continue;
-
-                usedVariants.Add(value);
-
-                if (config.ContainsKey("enchantmentIDs"))
+                output = CreateItemJson(item, component, cases);
+            }
+            else // use "type": "minecraft:range_dispatch",
+            {
+                List<(float threshold, string def)> entries = new();
+                int max = 0; //get max damage value
+                foreach (var definition in definitions)
                 {
-                    var enchantmentCases = GenerateEnchantmentCases(config, usedEnchantments);
-                    cases.AddRange(enchantmentCases);
-                    File.AppendAllText(allNames, $"\t{itemIndex}.{variantIndex++}) minecraft:{config["enchantmentIDs"]}\r\n");
-                    continue;
+                    if (int.TryParse(definition["damage"].Split('-').Last(), out int damage) && damage > max)
+                        max = damage;
                 }
+                foreach (var definition in definitions)
+                {
+                    var first = definition["damage"].Split('-').First();
+                    float defTo = 0;
+                    if (first.EndsWith("%"))
+                        defTo = float.Parse(first[..^1]) / 100;
+                    else
+                        defTo = int.Parse(first);
+                    var entry = Templates.DamageEntry.Replace("THRESHOLD", (defTo / max).ToString(CultureInfo.InvariantCulture));
+                    string? model;
 
-                var items = config["items"].Split(' ');
+                    var items = definition["items"].Split(' ');
 
-                string model = "";
+                    if (items.Contains("bow"))
+                        model = GenerateBowModelName(definition);
+                    else if (items.Contains("crossbow"))
+                        model = GenerateCrossbowModelName(definition);
+                    else
+                        model = GenerateModelName(definition);
+                    entry = entry.Replace("MODEL", GenerateRangedModel(model, definition));
 
-                if (items.Contains("bow"))
-                    model = GenerateBowModelName(config);
-                else if (items.Contains("crossbow"))
-                    model = GenerateCrossbowModelName(config);
-                else
-                    model = GenerateModelName(config);
-                string? caseString = GenerateCase(model, component, value, config);
-                if (caseString == null) continue;
-                cases.Add(caseString);
-                File.AppendAllText(allNames, $"\t{itemIndex}.{variantIndex++}) {value.GetName()}\r\n");
+                    entries.Add(((defTo / max), entry));
+                }
+                output = CreateRangedItemJson(item, entries);
             }
 
-            string? output = CreateItemJson(item, component, cases);
-            if (output == null) return;
+
+            if (output == null)
+                return;
             string outputFilePath = Path.Combine(NewPackPath, $"assets/minecraft/items/{item}.json");
             File.WriteAllText(outputFilePath, output);
             Console.WriteLine($"Generated item    {item} at assets/minecraft/items/{item}.json");
@@ -467,7 +521,8 @@ namespace VaniFine
                 if (config.TryGetValue("enchantmentLevels", out var levelsStr))
                 {
                     int level = int.Parse(levelsStr.Split(' ')[0].Split('-')[0]);
-                    if (usedEnchantments.TryGetValue(enchantment, out var levels) && levels.Contains(level)) continue;
+                    if (usedEnchantments.TryGetValue(enchantment, out var levels) && levels.Contains(level))
+                        continue;
                     usedEnchantments.TryAdd(enchantment, []);
                     usedEnchantments[enchantment].Add(level);
 
@@ -479,7 +534,8 @@ namespace VaniFine
                 {
                     for (int level = 1; level <= 5; level++)
                     {
-                        if (usedEnchantments.TryGetValue(enchantment, out var levels) && levels.Contains(level)) continue;
+                        if (usedEnchantments.TryGetValue(enchantment, out var levels) && levels.Contains(level))
+                            continue;
                         usedEnchantments.TryAdd(enchantment, []);
                         usedEnchantments[enchantment].Add(level);
 
@@ -490,12 +546,56 @@ namespace VaniFine
                 }
             }
         }
+
+        public static string? GenerateRangedModel(string model, Dictionary<string, string> config)
+        {
+            try
+            {
+                if (config["type"] == "armor")
+                    throw new NotImplementedException("Armor generation is not implemented");
+            }
+            catch (Exception e)
+            {
+                var c = Console.ForegroundColor;
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"[!] Unable to process the config: {config["FULL_FILE_NAME"]}  :  {e.Message}");
+                Console.ForegroundColor = c;
+                return null!;
+            }
+
+            if (config["items"].Split(' ').Contains("bow"))
+            {
+                var a = Templates.RangedCaseBowTemplate
+                    .Replace("MODEL", model)
+                    .Replace("PULLING_0", config.Get("model.bow_pulling_0", GenBowPullModel(config, 0) ?? model).Replace("item/", ""))
+                    .Replace("PULLING_1", config.Get("model.bow_pulling_1", GenBowPullModel(config, 1) ?? model).Replace("item/", ""))
+                    .Replace("PULLING_2", config.Get("model.bow_pulling_2", GenBowPullModel(config, 2) ?? model).Replace("item/", ""));
+                return a;
+            }
+            if (config["items"].Split(' ').Contains("crossbow"))
+            {
+                var a = Templates.RangedCaseCrossbowTemplate
+                    .Replace("MODEL", model)
+                    .Replace("PULLING_0", config.Get("model.crossbow_pulling_0", GenCrossbowPullModel(config, 0) ?? model).Replace("item/", ""))
+                    .Replace("PULLING_1", config.Get("model.crossbow_pulling_1", GenCrossbowPullModel(config, 1) ?? model).Replace("item/", ""))
+                    .Replace("PULLING_2", config.Get("model.crossbow_pulling_2", GenCrossbowPullModel(config, 2) ?? model).Replace("item/", ""))
+                    .Replace("ARROW", config.Get("model.crossbow_arrow", GenCrossbowPullModel(config, 3) ?? model).Replace("item/", ""))
+                    .Replace("FIREWORK", config.Get("model.crossbow_firework", GenCrossbowPullModel(config, 4) ?? model).Replace("item/", ""));
+                return a;
+            }
+            else
+            {
+                return Templates.RangedCaseTemplate
+                    .Replace("MODEL", model);
+            }
+        }
         public static string? GenerateCase(string model, string component, string value, Dictionary<string, string> config)
         {
             object whenCondition;
             try
             {
-                if (config["type"] == "armor") throw new NotImplementedException("Armor generation is not implemented");
+                if (config["type"] == "armor")
+                    throw new NotImplementedException("Armor generation is not implemented");
 
                 whenCondition = component switch
                 {
@@ -505,6 +605,15 @@ namespace VaniFine
                     "instrument" => value,
                     _ => throw new NotImplementedException($"Unknown component type: {component}")
                 };
+                if ((component is
+                        "potion" or
+                        "potion_contents" or
+                        "instrument" or
+                        "components.entity_data.variant")
+                    && !Regex.IsMatch(value, "^[_A-Za-z0-9:/]+$"))
+                {
+                    throw new($"The value {value} provided does not match the expected format.");
+                }
             }
             catch (Exception e)
             {
@@ -524,9 +633,9 @@ namespace VaniFine
             {
                 var a = Templates.CaseBowTemplate
                     .Replace("MODEL", model)
-                    .Replace("PULLING_0", config.Get("model.bow_pulling_0", model))
-                    .Replace("PULLING_1", config.Get("model.bow_pulling_1", model))
-                    .Replace("PULLING_2", config.Get("model.bow_pulling_2", model))
+                    .Replace("PULLING_0", config.Get("model.bow_pulling_0", GenBowPullModel(config, 0) ?? model))
+                    .Replace("PULLING_1", config.Get("model.bow_pulling_1", GenBowPullModel(config, 1) ?? model))
+                    .Replace("PULLING_2", config.Get("model.bow_pulling_2", GenBowPullModel(config, 2) ?? model))
                     .Replace("WHEN", whenValue);
                 return a;
             }
@@ -548,6 +657,47 @@ namespace VaniFine
                     .Replace("MODEL", model)
                     .Replace("WHEN", whenValue);
             }
+        }
+
+        public static string? GenCrossbowPullModel(Dictionary<string, string> config, int pullingIndex)
+        {
+            if (!config.TryGetValue("texture.crossbow_pulling_" + pullingIndex, out var texture) && pullingIndex < 3)
+                return null;
+
+            if (pullingIndex == 3 && !config.TryGetValue("texture.crossbow_arrow", out texture))
+                return null;
+            if (pullingIndex == 4 && !config.TryGetValue("texture.crossbow_firework", out texture))
+                return null;
+
+            var name = texture.Replace("item/", "");
+            var model = Templates.Combined.Replace("PARENT", "crossbow").Replace("TEXTURE", name);
+
+            File.WriteAllText(Path.Combine(NewPackPath, "assets/minecraft/models/item", $"{name}.json"), model);
+
+            return $"item/{name}";
+        }
+        public static string? GenBowPullModel(Dictionary<string, string> config, int pullingIndex)
+        {
+            if (!config.TryGetValue("texture.bow_pulling_" + pullingIndex, out var texture))
+                return null;
+
+            var name = texture.Replace("item/", "");
+            var model = Templates.Combined.Replace("PARENT", "bow").Replace("TEXTURE", name);
+
+            File.WriteAllText(Path.Combine(NewPackPath, "assets/minecraft/models/item", $"{name}.json"), model);
+
+            return $"item/{name}";
+        }
+        public static string? CreateRangedItemJson(string item, List<(float threshold, string def)> entries)
+        {
+            if (entries.Count == 0)
+                return Templates.EmptyCaseTemplate.Replace("ITEM", item);
+
+            entries.Sort((x, y) => y.threshold.CompareTo(x.threshold));
+
+            return Templates.DamageDefinitionTemplate
+                .Replace("ENTRY", string.Join(",", entries.Select(s => s.def)))
+                .Replace("FALLBACK", GetFallbackModel(item));
         }
         public static string? CreateItemJson(string item, string component, List<string> cases)
         {
@@ -601,11 +751,12 @@ namespace VaniFine
         }
         public static bool IsMacFile(this ZipArchiveEntry e)
         {
-            return e.FullName.Contains("__MACOSX");
+            return e.FullName.Contains("__MACOSX") || e.FullName.ToLower().Contains(".ds_store");
         }
         private static string GetName(this string value)
         {
-            if (string.IsNullOrWhiteSpace(value)) return value;
+            if (string.IsNullOrWhiteSpace(value))
+                return value;
             string v = value;
             if (v.Contains("regex:"))
             {
@@ -613,12 +764,14 @@ namespace VaniFine
             }
             v = v.Replace("ipattern:", "").Replace("pattern:", "").Replace("iregex:", "").Replace("regex:", "");
             v = Regex.Unescape(v).Replace(".*", "");
+            v = v.Replace("*", "");
+            v = char.ToUpper(v[0]) + v[1..]; // Capitalize first letter
             return v;
         }
-
         private static string Get(this Dictionary<string, string> dic, string key, string? def = null)
         {
-            if (dic.TryGetValue(key, out var value)) return value;
+            if (dic.TryGetValue(key, out var value))
+                return value;
             return def;
         }
         private static string ProcessRegexInput(string input)
