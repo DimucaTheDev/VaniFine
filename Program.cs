@@ -1,5 +1,6 @@
 ﻿using System.Globalization;
 using System.IO.Compression;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -28,13 +29,19 @@ namespace VaniFine
         private static JsonDocument AllItemModelsJsonDocument;
         private static JsonDocument AllBlockModelsJsonDocument;
 
+        private static readonly Version CurrentVersion = new Version(55, 3);
         private const string UserAgent = "VaniFine";
         private const string MapLink = "https://vf.cmdev.pw/map";
         private const string MinimumVersion = "1.21.5";
 
         static void Main(string[] args)
         {
-            Console.WriteLine($"VaniFine. CIT-to-Vanilla Converter Tool");
+            Console.WriteLine($"VaniFine({CurrentVersion}). CIT-to-Vanilla Converter Tool");
+            Http = new HttpClient();
+            Http.DefaultRequestHeaders.Add("User-Agent", UserAgent);
+
+
+
             RPPath = args.FirstOrDefault() ?? FileSelector.ShowDialog();
             if (string.IsNullOrEmpty(RPPath))
             {
@@ -50,8 +57,6 @@ namespace VaniFine
                 return;
             }
 
-            Http = new HttpClient();
-            Http.DefaultRequestHeaders.Add("User-Agent", UserAgent);
             string response;
             try
             {
@@ -317,7 +322,8 @@ namespace VaniFine
         {
             int index = 0;
             string allNames = $"{NewPackPath}/names.txt";
-            File.WriteAllText(allNames, $"Generated and converted using VaniFine tool. See https://github.com/DimucaTheDev/VaniFine\r\nItems: {itemDefinitions.Count}\r\nUnique names: {itemDefinitions.Values.SelectMany(s => s).Sum(s => s.Count + 1)}");
+            File.WriteAllText(allNames,
+                $"Generated and converted using VaniFine(v{CurrentVersion}) tool. See https://github.com/DimucaTheDev/VaniFine\r\nItems: {itemDefinitions.Count}");
 
             foreach (var (item, definitions) in itemDefinitions)
             {
@@ -325,6 +331,87 @@ namespace VaniFine
                 GenerateJsonForItem(item, definitions, index, allNames);
             }
         }
+        public static string GenerateTropicalFishJson(List<Dictionary<string, string>> definitions)
+        {
+            var grouped = new Dictionary<string, Dictionary<string, Dictionary<string, Dictionary<string, string>>>>();
+            // shape → patternColor → baseColor → definition
+
+            var fallback = GetFallbackModel("tropical_fish_bucket");
+
+            foreach (var def in definitions)
+            {
+                if (!def.TryGetValue("components.bucket_entity_data.BucketVariantTag", out var variantStr))
+                    continue;
+                if (!int.TryParse(variantStr, out var variant))
+                    continue;
+
+                if (!def.TryGetValue("texture", out var model))
+                    continue;
+
+                var info = TropicalFishInfo.FromInt(variant, def);
+
+                string shape = info.GetName().ToLowerInvariant();
+                string patternColor = info.PatternColor.ToString().ToLowerInvariant();
+                string baseColor = info.BaseColor.ToString().ToLowerInvariant();
+
+                if (!grouped.TryGetValue(shape, out var patternColorDict))
+                    grouped[shape] = patternColorDict = new();
+
+                if (!patternColorDict.TryGetValue(patternColor, out var baseColorDict))
+                    patternColorDict[patternColor] = baseColorDict = new();
+
+                if (!baseColorDict.ContainsKey(baseColor))
+                    baseColorDict[baseColor] = def;
+            }
+
+            StringBuilder sb = new StringBuilder();
+            int i = 1;
+            List<string> patternCases = new();
+            foreach (var shapePair in grouped)
+            {
+                string shapeName = shapePair.Key;
+                var patternColorCases = new List<string>();
+
+                foreach (var patternColorPair in shapePair.Value)
+                {
+                    string patternColorName = patternColorPair.Key;
+                    var baseColorCases = new List<string>();
+
+                    foreach (var baseColorPair in patternColorPair.Value)
+                    {
+                        string baseColorName = baseColorPair.Key;
+
+                        string baseCase = Templates.FishColorCase
+                            .Replace("MODEL", GenerateModelName(baseColorPair.Value))
+                            .Replace("WHEN", baseColorName);
+                        baseColorCases.Add(baseCase);
+
+                        TropicalFishInfo fish = TropicalFishInfo.FromInt(int.Parse(baseColorPair.Value["texture"]), null!);
+
+                        var variant = $"\t- ({i++}) {fish.Integer} => {fish.BaseColor}-{fish.PatternColor} {fish.GetName()}\n";
+                        sb.Append(variant);
+                    }
+
+                    string baseJoined = string.Join(",\n", baseColorCases);
+
+                    string patternColorCase = Templates.FishPatternColorCase
+                        .Replace("CASE", baseJoined)
+                        .Replace("WHEN", patternColorName);
+                    patternColorCases.Add(patternColorCase);
+                }
+                string patternColorJoined = string.Join(",\n", patternColorCases);
+                string patternCase = Templates.FishPatternCase
+                    .Replace("CASE", patternColorJoined)
+                    .Replace("WHEN", shapeName);
+                patternCases.Add(patternCase);
+            }
+            File.AppendAllText(Path.Combine(NewPackPath, "names.txt"), sb.ToString());
+
+            string finalJson = Templates.FishJsonItem.Replace("CASE", string.Join(",\n", patternCases)).Replace("FALLBACK", fallback);
+
+            return finalJson;
+        }
+
         public static void GenerateJsonForItem(string item, List<Dictionary<string, string>> definitions, int itemIndex, string allNames)
         {
             int variantIndex = 1;
@@ -342,7 +429,16 @@ namespace VaniFine
                     d["damage"] = v2;
             }
 
-            if (!definitions.All(s => s.ContainsKey("damage"))) // use "type": "minecraft:select",
+            if (definitions.All(s =>
+                    s["items"] == "tropical_fish_bucket" &&
+                    s.Keys.Any(s => s.Equals("components.bucket_entity_data.BucketVariantTag",
+                        StringComparison.InvariantCultureIgnoreCase))))
+            {
+                // tropical fish bucket variants...
+                output = GenerateTropicalFishJson(definitions);
+
+            }
+            else if (!definitions.All(s => s.ContainsKey("damage"))) // use "type": "minecraft:select",
             {
                 foreach (var config in definitions)
                 {
@@ -365,12 +461,12 @@ namespace VaniFine
 
                     usedVariants.Add(value.GetName());
 
-                    if (config.ContainsKey("enchantmentIDs"))
+                    if (config.TryGetValue("enchantmentIDs", out var enId))
                     {
                         var enchantmentCases = GenerateEnchantmentCases(config, usedEnchantments);
                         cases.AddRange(enchantmentCases);
                         File.AppendAllText(allNames,
-                            $"\t{itemIndex}.{variantIndex++}) minecraft:{config["enchantmentIDs"]}\r\n");
+                            $"\t{itemIndex}.{variantIndex++}) minecraft:{enId}\r\n");
                         continue;
                     }
 
@@ -432,7 +528,7 @@ namespace VaniFine
                 return;
             string outputFilePath = Path.Combine(NewPackPath, $"assets/minecraft/items/{item}.json");
             File.WriteAllText(outputFilePath, output);
-            Console.WriteLine($"Generated item    {item} at assets/minecraft/items/{item}.json");
+            Console.WriteLine($"Generated item    {item} at assets/minecraft/items/{item}.json\n");
         }
         public static void ProcessEnchantmentKeys(Dictionary<string, string> config)
         {
@@ -458,20 +554,26 @@ namespace VaniFine
             string model = config.FirstOrDefault(kvp => kvp.Key.StartsWith("model")).Value?.Replace(" ", "").Replace(".json", "") ?? $"item/{confFileName}";
             model = Path.GetFileName(model);
 
+            string p = "";
+
             if (!config.ContainsKey("model") && config.TryGetValue("texture", out var texture))
             {
+                p = Path.Combine(NewPackPath, "assets/minecraft/models/item", $"{confFileName}.json");
                 File.WriteAllText(
-                    Path.Combine(NewPackPath, "assets/minecraft/models/item", $"{confFileName}.json"),
+                    p,
                     Templates.SampleItemModelTemplate.Replace("ITEM", Path.GetFileNameWithoutExtension(texture.Replace(".png", "")))
                 );
             }
             if (config.ContainsKey("model") && config.ContainsKey("texture"))
             {
+                p = Path.Combine(NewPackPath, "assets/minecraft/models/item", $"{confFileName}_combined.json");
                 File.WriteAllText(
-                    Path.Combine(NewPackPath, "assets/minecraft/models/item", $"{confFileName}_combined.json"),
+                    p,
                     CombineModels(config));
                 model = $"{confFileName}_combined";
             }
+            if (!string.IsNullOrWhiteSpace(p))
+                Console.WriteLine($"\tGenerated model {model} at {Path.GetRelativePath(NewPackPath, p)}");
             return model.StartsWith("item") ? model : "item/" + model;
         }
 

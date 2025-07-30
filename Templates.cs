@@ -2,6 +2,77 @@
 {
     internal static class Templates
     {
+        public static readonly string FishBucketModel =
+            """
+            {
+              "parent": "minecraft:item/generated",
+              "textures": {
+                "layer0": "minecraft:item/tropical_fish_bucket"
+              }
+            }
+            """;
+
+        public static readonly string FishColorCase =
+            """
+            {
+                "model": {
+                    "type": "minecraft:model",
+                    "model": "minecraft:MODEL"
+                },
+                "when": "WHEN" 
+            }
+            """;
+        public static readonly string FishPatternColorCase =
+            """
+            {
+                "model": {
+                    "type": "minecraft:select",
+                    "property": "minecraft:component",
+                    "component": "minecraft:tropical_fish/base_color",
+                    "cases": [
+                        CASE
+                    ],
+                    "fallback": {
+                        FALLBACK
+                    }
+                },
+                "when": "WHEN"
+            }
+            """;
+        public static readonly string FishPatternCase =
+            """
+            {
+                "model": {
+                    "type": "minecraft:select",
+                    "property": "minecraft:component",
+                    "component": "minecraft:tropical_fish/pattern_color",
+                    "cases": [
+                        CASE
+                    ],
+                    "fallback": {
+                        FALLBACK
+                    }
+                },
+                "when": "WHEN" 
+            }
+            """;
+        public static readonly string FishJsonItem =
+            """
+            {
+                "model": {
+                    "type": "minecraft:select",
+                    "property": "minecraft:component",
+                    "component": "minecraft:tropical_fish/pattern",
+                    "cases": [
+                        CASE
+                    ],
+                    "fallback": {
+                        FALLBACK
+                    }
+                }
+            }
+            """;
+
         public static readonly string DefinitionTemplate =
             """
             {
