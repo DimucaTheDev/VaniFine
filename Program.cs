@@ -4,8 +4,9 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Newtonsoft.Json.Linq;
 using VaniFine.Properties;
-
+// ReSharper disable LocalizableElement
 namespace VaniFine
 {
     internal static class Program
@@ -28,8 +29,9 @@ namespace VaniFine
         private static JsonDocument AllItemsJsonDocument;
         private static JsonDocument AllItemModelsJsonDocument;
         private static JsonDocument AllBlockModelsJsonDocument;
+        private static List<string> BlocksAtlasTextures = new();
 
-        private static readonly Version CurrentVersion = new Version(55, 3);
+        private static readonly Version CurrentVersion = new Version(55, 4);
         private const string UserAgent = "VaniFine";
         private const string MapLink = "https://vf.cmdev.pw/map";
         private const string MinimumVersion = "1.21.5";
@@ -87,6 +89,7 @@ namespace VaniFine
             ExtractFiles();
             var files = ProcessCitProperties();
             GenerateItemJsonFiles(files);
+            GenerateBlocksAtlas();
 
             Console.WriteLine("\nResource pack converted! Path: " + NewPackPath);
             Thread.Sleep(5000);
@@ -126,6 +129,39 @@ namespace VaniFine
             AllItemsJsonDocument = JsonDocument.Parse(Http.GetString(AllItemsJsonUrl));
             AllItemModelsJsonDocument = JsonDocument.Parse(Http.GetString(AllItemModelsJsonUrl));
             AllBlockModelsJsonDocument = JsonDocument.Parse(Http.GetString(AllBlockModelsJsonUrl));
+        }
+        public static void GenerateBlocksAtlas()
+        {
+            var atlasEntry = Zip.GetEntry("assets/minecraft/atlases/blocks.json");
+            if (atlasEntry is not null)
+            {
+                Directory.CreateDirectory(Path.Combine(NewPackPath, "assets/minecraft/atlases/"));
+                var root = JObject.Parse(atlasEntry.GetString());
+
+                var sources = (JArray)root["sources"];
+                foreach (var source in sources)
+                {
+                    var textures = source["textures"] as JArray;
+                    if (textures == null)
+                        continue;
+
+                    for (int i = 0; i < textures.Count; i++)
+                    {
+                        string value = textures[i]!.ToString();
+                        textures[i] = $"trims/items/{Path.GetFileNameWithoutExtension(value)}";
+                    }
+                }
+
+                File.WriteAllText(Path.Combine(NewPackPath, "assets/minecraft/atlases/blocks.json"), root.ToString());
+                Console.WriteLine("Blocks atlas extracted.");
+            }
+            else if (BlocksAtlasTextures.Any())
+            {
+                Directory.CreateDirectory(Path.Combine(NewPackPath, "assets/minecraft/atlases/"));
+                // #DIY
+                var content = Templates.BlockAtlas.Replace("TEXTURES", string.Join(",\n", BlocksAtlasTextures));
+                File.WriteAllText(Path.Combine(NewPackPath, "assets/minecraft/atlases/blocks.json"), content);
+            }
         }
         public static string GenerateOutputPath()
         {
@@ -187,7 +223,6 @@ namespace VaniFine
         public static void ExtractItemModels(ZipArchiveEntry entry)
         {
             string targetPath = Path.Combine(NewPackPath, "assets/minecraft/models/item", entry.Name);
-            Console.WriteLine($"Extracted model   {targetPath.Replace(NewPackPath, "").Replace("\\", "/")}");
 
             using StreamReader stream = new StreamReader(entry.Open());
             Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
@@ -204,7 +239,10 @@ namespace VaniFine
                 foreach (var texture in textures)
                 {
                     string filename = Path.GetFileNameWithoutExtension(texture.Value);
-                    updatedTextures[texture.Key] = $"item/{filename}";
+                    if (texture.Value.Contains("trims/", StringComparison.InvariantCultureIgnoreCase))
+                        updatedTextures[texture.Key] = $"trims/items/{filename}";
+                    else
+                        updatedTextures[texture.Key] = $"item/{filename}";
                 }
 
                 data["textures"] = updatedTextures;
@@ -217,10 +255,16 @@ namespace VaniFine
             }
 
             File.WriteAllText(targetPath, content);
+            Console.WriteLine($"Extracted model   {targetPath.Replace(NewPackPath, "").Replace("\\", "/")}");
+
         }
         public static void ExtractTextures(ZipArchiveEntry entry)
         {
-            string targetPath = Path.Combine(NewPackPath, "assets/minecraft/textures/item", entry.Name);
+            var trim = entry.FullName.Contains("/trims/");
+            if (trim)
+                BlocksAtlasTextures.Add($"\"trims/items/{entry.Name}\"");
+            string targetPath = Path.Combine(NewPackPath,
+                trim ? "assets/minecraft/textures/trims/items" : "assets/minecraft/textures/item", entry.Name);
             Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
             entry.ExtractToFile(targetPath, overwrite: true);
             Console.WriteLine($"Extracted texture {entry.Name}");
@@ -438,6 +482,37 @@ namespace VaniFine
                 output = GenerateTropicalFishJson(definitions);
 
             }
+            else if (definitions.All(s => s.Keys.Any(s => s.Contains("nbt.Trim", StringComparison.InvariantCultureIgnoreCase))))
+            {
+                //trimmed armor 
+                foreach (var definition in definitions)
+                {
+                    var pattern = definition.First(s =>
+                        s.Key.Contains("nbt.trim.pattern", StringComparison.InvariantCultureIgnoreCase)).Value;
+                    var material = definition.First(s =>
+                        s.Key.Contains("nbt.trim.material", StringComparison.InvariantCultureIgnoreCase)).Value;
+
+                    if (string.IsNullOrWhiteSpace(component))
+                        component = DetectComponent(definition);
+
+                    string model = GenerateModelName(definition);
+
+                    int? tint = item.Contains("leather") ? -6265536 : null;
+
+                    string modelCase = GenerateCase(model, "trim", new Dictionary<string, string>
+                    {
+                        {
+                            "pattern", pattern
+                        },
+                        {
+                            "material", material
+                        }
+                    }, definition, tint)!;
+                    cases.Add(modelCase);
+                    File.AppendAllText(allNames, $"\t{itemIndex}.{variantIndex++}) Trim: {pattern} {material}\r\n");
+                }
+                output = CreateItemJson(item, component, cases);
+            }
             else if (!definitions.All(s => s.ContainsKey("damage"))) // use "type": "minecraft:select",
             {
                 foreach (var config in definitions)
@@ -555,14 +630,14 @@ namespace VaniFine
             model = Path.GetFileName(model);
 
             string p = "";
+            string textureName = "";
 
             if (!config.ContainsKey("model") && config.TryGetValue("texture", out var texture))
             {
                 p = Path.Combine(NewPackPath, "assets/minecraft/models/item", $"{confFileName}.json");
-                File.WriteAllText(
-                    p,
-                    Templates.SampleItemModelTemplate.Replace("ITEM", Path.GetFileNameWithoutExtension(texture.Replace(".png", "")))
-                );
+                var content = Templates.SampleItemModelTemplate.Replace("ITEM",
+                    textureName = Path.GetFileNameWithoutExtension(texture.Replace(".png", "")));
+                File.WriteAllText(p, content);
             }
             if (config.ContainsKey("model") && config.ContainsKey("texture"))
             {
@@ -572,6 +647,7 @@ namespace VaniFine
                     CombineModels(config));
                 model = $"{confFileName}_combined";
             }
+
             if (!string.IsNullOrWhiteSpace(p))
                 Console.WriteLine($"\tGenerated model {model} at {Path.GetRelativePath(NewPackPath, p)}");
             return model.StartsWith("item") ? model : "item/" + model;
@@ -709,7 +785,7 @@ namespace VaniFine
                     .Replace("MODEL", model);
             }
         }
-        public static string? GenerateCase(string model, string component, string value, Dictionary<string, string> config)
+        public static string? GenerateCase(string model, string component, dynamic value, Dictionary<string, string> config, int? tint = null)
         {
             object whenCondition;
             try
@@ -717,19 +793,21 @@ namespace VaniFine
                 if (config["type"] == "armor")
                     throw new NotImplementedException("Armor generation is not implemented");
 
-                whenCondition = component switch
+                whenCondition = component.Replace("minecraft:", "") switch
                 {
-                    "potion" or "potion_contents" => new Dictionary<string, string> { { "potion", value } },
-                    "display.name" => value.GetName(),
+                    "potion" or "potion_contents" => new Dictionary<string, string> { { "potion", value.ToString() } },
+                    "display.name" => GetName(value),
                     "components.entity_data.variant" => value,
                     "instrument" => value,
                     "damage" => throw new InvalidOperationException($"Can not use both DAMAGE and another component on one item"),
+                    "trim" => value, // dic<strin, string>
                     _ => throw new NotImplementedException($"Unknown component type: {component}")
                 };
-                if ((component is
+                if (value is string && (component is
                         "potion" or
                         "potion_contents" or
                         "instrument" or
+                        "trim" or
                         "components.entity_data.variant")
                     && !Regex.IsMatch(value, "^[_A-Za-z0-9:/]+$"))
                 {
@@ -775,7 +853,8 @@ namespace VaniFine
 
             return Templates.CaseTemplate
                 .Replace("MODEL", model)
-                .Replace("WHEN", whenValue);
+                .Replace("WHEN", whenValue)
+                .Replace("TINT", tint == null ? "" : Templates.Tint.Replace("NUM", tint.Value.ToString()));
         }
 
         public static string? GenCrossbowPullModel(Dictionary<string, string> config, int pullingIndex)
@@ -834,6 +913,7 @@ namespace VaniFine
                     "components.entity_data.variant" => "minecraft:painting/variant",
                     "stored_enchantments" => "minecraft:stored_enchantments",
                     "instrument" => "minecraft:instrument",
+                    "trim.pattern" or "trim.material" => "minecraft:trim",
                     _ => throw new NotImplementedException($"Unknown component type: {component}")
                 };
             }
