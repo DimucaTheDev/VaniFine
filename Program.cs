@@ -31,7 +31,7 @@ namespace VaniFine
         private static JsonDocument AllBlockModelsJsonDocument;
         private static List<string> BlocksAtlasTextures = new();
 
-        private static readonly Version CurrentVersion = new Version(55, 4);
+        private static readonly Version CurrentVersion = new Version(55, 5);
         private const string UserAgent = "VaniFine";
         private const string MapLink = "https://vf.cmdev.pw/map";
         private const string MinimumVersion = "1.21.5";
@@ -370,7 +370,7 @@ namespace VaniFine
                 $"Generated and converted using VaniFine(v{CurrentVersion}) tool. See https://github.com/DimucaTheDev/VaniFine\r\nItems: {itemDefinitions.Count}");
 
             foreach (var (item, definitions) in itemDefinitions)
-            {
+            { 
                 File.AppendAllText(allNames, $"\r\n{++index}) {item}\r\n");
                 GenerateJsonForItem(item, definitions, index, allNames);
             }
@@ -487,6 +487,12 @@ namespace VaniFine
                 //trimmed armor 
                 foreach (var definition in definitions)
                 {
+                    if (definition["FILE_NAME"].Contains(" "))
+                    {
+                        // just whyyyyy
+                        Console.WriteLine($"Skipped '{definition["FILE_NAME"]}' cuz of space in name. NotImplemented. why, author!!!!");
+                        continue;
+                    }
                     var pattern = definition.First(s =>
                         s.Key.Contains("nbt.trim.pattern", StringComparison.InvariantCultureIgnoreCase)).Value;
                     var material = definition.First(s =>
@@ -517,6 +523,13 @@ namespace VaniFine
             {
                 foreach (var config in definitions)
                 {
+                    if (config["FILE_NAME"].Contains(" "))
+                    {
+                        // just whyyyyy
+                        Console.WriteLine($"Skipped '{config["FILE_NAME"]}' cuz of space in name. NotImplemented. why, author!!!!");
+                        continue;
+                    }
+
                     if (config.Keys.Any(k => k.Contains("nbt.StoredEnchantments")))
                     {
                         Console.WriteLine($"SKIPPED {config["FILE_NAME"]}: TODO");
@@ -569,6 +582,12 @@ namespace VaniFine
                 int max = 0; //get max damage value
                 foreach (var definition in definitions)
                 {
+                    if (definition["FILE_NAME"].Contains(" "))
+                    {
+                        // just whyyyyy
+                        Console.WriteLine($"Skipped '{definition["FILE_NAME"]}' cuz of space in name. NotImplemented. why, author!!!!");
+                        continue;
+                    }
                     if (int.TryParse(definition["damage"].Split('-').Last(), out int damage) && damage > max)
                         max = damage;
                 }
@@ -722,9 +741,25 @@ namespace VaniFine
                     usedEnchantments.TryAdd(enchantment, []);
                     usedEnchantments[enchantment].Add(level);
 
-                    yield return Templates.CaseTemplate
-                        .Replace("MODEL", $"item/{Path.GetFileNameWithoutExtension(config["texture"])}")
-                        .Replace("WHEN", JsonSerializer.Serialize(new Dictionary<string, int> { { $"minecraft:{enchantment}", level } }));
+                    string r = null!;
+                    try
+                    {
+                        r = Templates.CaseTemplate
+                            .Replace("MODEL",
+                                $"item/{Path.GetFileNameWithoutExtension(config.TryGetValue("texture", out var t) ? t : config["model"])}")
+                            .Replace("WHEN",
+                                JsonSerializer.Serialize(new Dictionary<string, int>
+                                    { { $"minecraft:{enchantment}", level } }));
+                    }
+                    catch (Exception e)
+                    {
+                        var c = Console.ForegroundColor;
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine($"[!] Error occured when trying to process enchantment {enchantment} on {config["FULL_FILE_NAME"]}  :  {e.Message}");
+                        Console.ForegroundColor = c;
+                    }
+                    if (r != null!)
+                        yield return r;
                 }
                 else
                 {
