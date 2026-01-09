@@ -9,6 +9,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="newtonsoft.json" Version="13.0.3" />
+		<PackageReference Include="System.Drawing.Common" Version="9.0.11" />
 	</ItemGroup>
 
 	<ItemGroup>

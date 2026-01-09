@@ -1,12 +1,29 @@
-﻿using System.Globalization;
+﻿using System.Drawing;
+using System.Drawing.Imaging;
+using System.Globalization;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json.Linq;
 using VaniFine.Properties;
 // ReSharper disable LocalizableElement
+
+//
+//   *** !!! SHITTY CODE ALERT !!! ***
+//  WARNING: THIS CODE IS PURE SHIT NOT GONNA LIE!!!!
+//         PROCEED WITH CAUTION
+//
+//  1. If it works - don't touch it.
+//  2. Do not say code is bad, I already know that.
+//  3. Result > Code Quality.
+//
+// dev note: I do not like this project because every time I need to fix smth
+//    I need to remember everything what and how works, sorry if I didnt fix
+//    your issue ticket.. please :)      Rewrite with normal file and code structure? Naahhhhh...
+
 namespace VaniFine
 {
     internal static class Program
@@ -42,19 +59,17 @@ namespace VaniFine
             Http = new HttpClient();
             Http.DefaultRequestHeaders.Add("User-Agent", UserAgent);
 
-
-
             RPPath = args.FirstOrDefault() ?? FileSelector.ShowDialog();
             if (string.IsNullOrEmpty(RPPath))
             {
-                Console.WriteLine("No file selected.");
+                LogError("No file selected.");
                 Thread.Sleep(5000);
                 return;
             }
             Console.WriteLine($"Selected file: {RPPath}");
             if (!VerifyPack())
             {
-                Console.WriteLine("Pack validation failed! Is this a valid resource pack?");
+                LogError("Pack validation failed! Is this a valid resource pack?");
                 Thread.Sleep(5000);
                 return;
             }
@@ -66,7 +81,7 @@ namespace VaniFine
             }
             catch
             {
-                Console.WriteLine("Unable to get version map from server. using local copy...");
+                LogError("Unable to get version map from server. using local copy...");
                 response = Resources.map;
             }
 
@@ -87,12 +102,40 @@ namespace VaniFine
             ExtractPackIcon();
             SavePackMetadata();
             ExtractFiles();
+            ExtractNonMinecraftAssets(); // #13 <--- VERY BAD!!!!! I should rewrite whole code to support non minecraft: ids, at some time...
             var files = ProcessCitProperties();
             GenerateItemJsonFiles(files);
             GenerateBlocksAtlas();
+            ProcessFonts();
 
             Console.WriteLine("\nResource pack converted! Path: " + NewPackPath);
             Thread.Sleep(5000);
+        }
+
+        public static void ExtractNonMinecraftAssets()
+        {
+            Zip.Entries.Where(s => !s.IsMacFile() && s.Length != 0)
+                .Where(s => s.FullName.Contains("assets/") && !s.FullName.Contains("assets/minecraft/"))
+                .ToList()
+                .ForEach(entry =>
+                {
+                    string targetPath = Path.Combine(NewPackPath, entry.FullName);
+                    Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+                    entry.ExtractToFile(targetPath, overwrite: true);
+                    Console.WriteLine($"Extracted non-minecraft asset {entry.FullName}");
+                });
+        }
+
+        public static void ProcessFonts()
+        {
+            foreach (var file in Zip.Entries.Where(s => !s.IsMacFile() && s.Length != 0 && s.FullName.Contains("/font/")))
+            {
+                // we just scrap everything that has "font" in its path, hope that works lol
+                var dst = Path.Combine(NewPackPath, file.FullName);
+                Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+                file.ExtractToFile(dst, overwrite: true);
+                Console.WriteLine($"Extracted font file {file.FullName}");
+            }
         }
 
         public static bool VerifyPack()
@@ -173,6 +216,11 @@ namespace VaniFine
             Directory.CreateDirectory(Path.Combine(path, "assets/minecraft/items"));
             Directory.CreateDirectory(Path.Combine(path, "assets/minecraft/models/item"));
             Directory.CreateDirectory(Path.Combine(path, "assets/minecraft/textures/item"));
+            //vf_missing_placeholder
+
+            using var bmp = new Bitmap(1, 1, PixelFormat.Format32bppArgb);
+            bmp.SetPixel(0, 0, System.Drawing.Color.FromArgb(0, 0, 0, 0));
+            bmp.Save(Path.Combine(path, "assets/minecraft/textures/item/vf_missing_placeholder.png"), ImageFormat.Png);
             return path;
         }
         public static void ExtractPackIcon()
@@ -223,48 +271,86 @@ namespace VaniFine
         public static void ExtractItemModels(ZipArchiveEntry entry)
         {
             string targetPath = Path.Combine(NewPackPath, "assets/minecraft/models/item", entry.Name);
-
-            using StreamReader stream = new StreamReader(entry.Open());
             Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
-            string content = stream.ReadToEnd();
+
+            string content;
+            using (var stream = new StreamReader(entry.Open()))
+            {
+                content = stream.ReadToEnd();
+            }
 
             content = content.Replace("./", "item/");
 
-            var data = JsonSerializer.Deserialize<Dictionary<string, object>>(content);
-            if (data != null && data.ContainsKey("textures"))
+            var rootNode = JsonNode.Parse(content);
+            if (rootNode == null || rootNode["textures"] == null)
             {
-                var textures = JsonSerializer.Deserialize<Dictionary<string, string>>(data["textures"].ToString());
+                LogError($"{entry.FullName}: Incorrect model");
+                return;
+            }
 
-                var updatedTextures = new Dictionary<string, string>();
-                foreach (var texture in textures)
+            var texturesObj = rootNode["textures"]!.AsObject();
+            var updatedTextures = new Dictionary<string, string>();
+
+            var textureProperties = texturesObj.ToList();
+            foreach (var prop in textureProperties)
+            {
+                string originalValue = prop.Value!.ToString();
+                string filename = Path.GetFileNameWithoutExtension(originalValue);
+
+                string newValue = originalValue.Contains("trims/", StringComparison.InvariantCultureIgnoreCase)
+                    ? $"trims/items/{filename}"
+                    : $"item/{filename}";
+
+                texturesObj[prop.Key] = newValue;
+            }
+
+            texturesObj["__missing__"] = "item/vf_missing_placeholder";
+
+            var validTextureKeys = texturesObj.Select(t => t.Key).ToHashSet();
+
+            FixMissingTextureRefs(rootNode, validTextureKeys, entry);
+
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            File.WriteAllText(targetPath, rootNode.ToJsonString(options));
+        }
+        public static void FixMissingTextureRefs(JsonNode? node, HashSet<string> validTextures, ZipArchiveEntry entry)
+        {
+            if (node is JsonObject obj)
+            {
+                foreach (var property in obj.ToList())
                 {
-                    string filename = Path.GetFileNameWithoutExtension(texture.Value);
-                    if (texture.Value.Contains("trims/", StringComparison.InvariantCultureIgnoreCase))
-                        updatedTextures[texture.Key] = $"trims/items/{filename}";
+                    if (property.Key == "texture" && property.Value is JsonValue val && val.TryGetValue<string>(out var s))
+                    {
+                        if (s.StartsWith("#"))
+                        {
+                            var texKey = s[1..];
+                            if (!validTextures.Contains(texKey))
+                            {
+                                obj[property.Key] = "#__missing__";
+                                LogWarning($"Warning: in model {entry.FullName} non-valid texture reference '{texKey}' has been replaced with placeholder.");
+                            }
+                        }
+                    }
                     else
-                        updatedTextures[texture.Key] = $"item/{filename}";
+                    {
+                        FixMissingTextureRefs(property.Value, validTextures, entry);
+                    }
                 }
-
-                data["textures"] = updatedTextures;
-
-                content = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
             }
-            else
+            else if (node is JsonArray array)
             {
-                Console.WriteLine($"{entry.FullName}: Incorrect model");
+                foreach (var item in array)
+                {
+                    FixMissingTextureRefs(item, validTextures, entry);
+                }
             }
-
-            File.WriteAllText(targetPath, content);
-            Console.WriteLine($"Extracted model   {targetPath.Replace(NewPackPath, "").Replace("\\", "/")}");
-
         }
         public static void ExtractTextures(ZipArchiveEntry entry)
         {
             var trim = entry.FullName.Contains("/trims/");
             if (trim)
                 BlocksAtlasTextures.Add($"\"trims/items/{entry.Name}\"");
-            string targetPath = Path.Combine(NewPackPath,
-                trim ? "assets/minecraft/textures/trims/items" : "assets/minecraft/textures/item", entry.Name);
+            string targetPath = Path.Combine(NewPackPath, trim ? "assets/minecraft/textures/trims/items" : "assets/minecraft/textures/item", entry.Name);
             Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
             entry.ExtractToFile(targetPath, overwrite: true);
             Console.WriteLine($"Extracted texture {entry.Name}");
@@ -301,10 +387,7 @@ namespace VaniFine
                 var readToEnd = reader.ReadToEnd();
                 if (readToEnd.Contains("CustomPotionEffects:"))
                 {
-                    var c = Console.ForegroundColor;
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.WriteLine($"[!] Skipped config: {entry.FullName}  :  'CustomPotionEffects' parsing is not implemented");
-                    Console.ForegroundColor = c;
+                    LogError($"Skipped config: {entry.FullName}  :  'CustomPotionEffects' parsing is not implemented");
                     continue;
                 }
                 var stringsEnumerable = readToEnd.Split('\n')
@@ -370,7 +453,7 @@ namespace VaniFine
                 $"Generated and converted using VaniFine(v{CurrentVersion}) tool. See https://github.com/DimucaTheDev/VaniFine\r\nItems: {itemDefinitions.Count}");
 
             foreach (var (item, definitions) in itemDefinitions)
-            { 
+            {
                 File.AppendAllText(allNames, $"\r\n{++index}) {item}\r\n");
                 GenerateJsonForItem(item, definitions, index, allNames);
             }
@@ -490,7 +573,7 @@ namespace VaniFine
                     if (definition["FILE_NAME"].Contains(" "))
                     {
                         // just whyyyyy
-                        Console.WriteLine($"Skipped '{definition["FILE_NAME"]}' cuz of space in name. NotImplemented. why, author!!!!");
+                        LogError($"Skipped '{definition["FILE_NAME"]}' cuz of space in name. NotImplemented. why, author!!!!");
                         continue;
                     }
                     var pattern = definition.First(s =>
@@ -526,7 +609,7 @@ namespace VaniFine
                     if (config["FILE_NAME"].Contains(" "))
                     {
                         // just whyyyyy
-                        Console.WriteLine($"Skipped '{config["FILE_NAME"]}' cuz of space in name. NotImplemented. why, author!!!!");
+                        LogError($"Skipped '{config["FILE_NAME"]}' cuz of space in name. NotImplemented. why, author!!!!");
                         continue;
                     }
 
@@ -551,11 +634,19 @@ namespace VaniFine
 
                     if (config.TryGetValue("enchantmentIDs", out var enId))
                     {
-                        var enchantmentCases = GenerateEnchantmentCases(config, usedEnchantments);
-                        cases.AddRange(enchantmentCases);
-                        File.AppendAllText(allNames,
-                            $"\t{itemIndex}.{variantIndex++}) minecraft:{enId}\r\n");
-                        continue;
+                        if (config.Keys.Any(s => s.ToLower().Contains("display.name")))
+                        {
+                            //we cant mix name and enchant
+                            LogWarning($"Skipped enchantment case '{enId}' for {config["FILE_NAME"]}, we cant combine Custom Name and enchantments components :(");
+                        }
+                        else
+                        {
+                            var enchantmentCases = GenerateEnchantmentCases(config, usedEnchantments);
+                            cases.AddRange(enchantmentCases);
+                            File.AppendAllText(allNames,
+                                $"\t{itemIndex}.{variantIndex++}) minecraft:{enId}\r\n");
+                            continue;
+                        }
                     }
 
                     var items = config["items"].Split(' ');
@@ -753,10 +844,7 @@ namespace VaniFine
                     }
                     catch (Exception e)
                     {
-                        var c = Console.ForegroundColor;
-                        Console.ForegroundColor = ConsoleColor.Red;
-                        Console.WriteLine($"[!] Error occured when trying to process enchantment {enchantment} on {config["FULL_FILE_NAME"]}  :  {e.Message}");
-                        Console.ForegroundColor = c;
+                        LogError($"Error occured when trying to process enchantment {enchantment} on {config["FULL_FILE_NAME"]}  :  {e.Message}");
                     }
                     if (r != null!)
                         yield return r;
@@ -787,10 +875,7 @@ namespace VaniFine
             }
             catch (Exception e)
             {
-                var c = Console.ForegroundColor;
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[!] Unable to process the config: {config["FULL_FILE_NAME"]}  :  {e.Message}");
-                Console.ForegroundColor = c;
+                LogError($"Unable to process the config: {config["FULL_FILE_NAME"]}  :  {e.Message}");
                 return null!;
             }
 
@@ -851,10 +936,7 @@ namespace VaniFine
             }
             catch (Exception e)
             {
-                var c = Console.ForegroundColor;
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[!] Unable to process the config: {config["FULL_FILE_NAME"]}  :  {e.Message}");
-                Console.ForegroundColor = c;
+                LogError($"Unable to process the config: {config["FULL_FILE_NAME"]}  :  {e.Message}");
                 return null!;
             }
 
@@ -954,12 +1036,10 @@ namespace VaniFine
             }
             catch (Exception e)
             {
-                var c = Console.ForegroundColor;
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[!] Unable to process the item: {item}  :  {e.Message}");
-                Console.ForegroundColor = c;
+                LogError($"Unable to process the item: {item}  :  {e.Message}");
                 return null!;
             }
+
             return Templates.DefinitionTemplate
                 .Replace("NBT_NAME", nbtName)
                 .Replace("BLOCK_OR_ITEM", "item")
@@ -1025,6 +1105,21 @@ namespace VaniFine
             }
 
             return input;
+        }
+
+        public static void LogError(string content)
+        {
+            var c = Console.ForegroundColor;
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[!] {content}");
+            Console.ForegroundColor = c;
+        }
+        public static void LogWarning(string content)
+        {
+            var c = Console.ForegroundColor;
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"[!] {content}");
+            Console.ForegroundColor = c;
         }
     }
 }
